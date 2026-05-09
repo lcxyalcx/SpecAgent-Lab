@@ -1,0 +1,98 @@
+generator client {
+  provider      = "prisma-client-js"
+  // Vercel serverless (Node on Amazon Linux) — see https://www.prisma.io/docs/orm/prisma-client/deployment/serverless/deploy-to-vercel
+  binaryTargets = ["native", "rhel-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum AgentMode {
+  PLAYGROUND
+  BENCHMARK
+  BASELINE
+  DRAFT_VERIFIER
+}
+
+enum RunStatus {
+  QUEUED
+  RUNNING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+}
+
+enum ToolCallStatus {
+  SUCCEEDED
+  FAILED
+  TIMEOUT
+}
+
+model AgentConfig {
+  id            String    @id @default(cuid())
+  name          String
+  mode          AgentMode
+  model         String
+  systemPrompt  String
+  enabledTools  Json
+  toolConfig    Json?
+  metadata      Json?
+  createdAt     DateTime  @default(now())
+  runs          Run[]
+}
+
+model BenchmarkTask {
+  id               String    @id @default(cuid())
+  slug             String    @unique
+  title            String
+  description      String
+  category         String
+  difficulty       Int
+  conversation     Json
+  evaluationRubric Json
+  expectedTools    Json
+  toolConfig       Json?
+  createdAt        DateTime  @default(now())
+  runs             Run[]
+}
+
+model Run {
+  id              String        @id @default(cuid())
+  name            String
+  agentConfigId   String
+  benchmarkTaskId String?
+  status          RunStatus     @default(QUEUED)
+  input           Json?
+  output          Json?
+  summary         Json?
+  metrics         Json?
+  startedAt       DateTime?
+  finishedAt      DateTime?
+  createdAt       DateTime      @default(now())
+  agentConfig     AgentConfig   @relation(fields: [agentConfigId], references: [id], onDelete: Cascade)
+  benchmarkTask   BenchmarkTask? @relation(fields: [benchmarkTaskId], references: [id], onDelete: SetNull)
+  toolCalls       ToolCall[]
+
+  @@index([agentConfigId])
+  @@index([benchmarkTaskId])
+  @@index([status])
+}
+
+model ToolCall {
+  id         String         @id @default(cuid())
+  runId      String
+  toolName   String
+  sequence   Int
+  status     ToolCallStatus @default(SUCCEEDED)
+  input      Json
+  output     Json?
+  error      Json?
+  latencyMs  Int?
+  createdAt  DateTime       @default(now())
+  run        Run            @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([runId])
+  @@index([runId, sequence])
+}
