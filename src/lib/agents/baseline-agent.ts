@@ -1,6 +1,7 @@
-import { openai } from "@ai-sdk/openai";
 import { generateText, stepCountIs } from "ai";
 
+import type { ApiProviderConfigInput } from "@/lib/ai/config";
+import { getLanguageModel } from "@/lib/ai/provider";
 import { specAgentTools } from "@/lib/tools";
 
 const MODEL_PRICING_USD_PER_1M_TOKENS: Record<
@@ -21,6 +22,7 @@ const MODEL_PRICING_USD_PER_1M_TOKENS: Record<
 
 const DEFAULT_MODEL_PRICING = { input: 1, output: 4 };
 const MAX_AGENT_STEPS = 6;
+const MAX_AGENT_OUTPUT_TOKENS = 320;
 
 export type EnabledToolName = keyof typeof specAgentTools;
 
@@ -30,6 +32,7 @@ export type BaselineAgentInput = {
   model: string;
   enabledTools: EnabledToolName[];
   benchmarkTaskId?: string;
+  providerConfig?: ApiProviderConfigInput;
 };
 
 export type RunToolCallRecord = {
@@ -74,9 +77,10 @@ export async function runBaselineAgent(
 
   try {
     const result = await generateText({
-      model: openai(input.model),
+      model: getLanguageModel(input.model, input.providerConfig),
       system: input.systemPrompt,
       prompt: input.userPrompt,
+      maxOutputTokens: MAX_AGENT_OUTPUT_TOKENS,
       tools: specAgentTools,
       activeTools,
       stopWhen: stepCountIs(MAX_AGENT_STEPS),

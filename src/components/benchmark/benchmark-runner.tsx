@@ -44,14 +44,17 @@ import {
   benchmarkTaskLibrary,
   type BenchmarkTaskDefinition,
 } from "@/lib/benchmark/tasks";
+import { useLocalApiConfig } from "@/hooks/use-local-api-config";
 import { cn } from "@/lib/utils";
 
 type BenchmarkMode = "baseline" | "draft_verifier";
 
 type BenchmarkRunResponse = {
   benchmarkId: string;
+  persisted: boolean;
   results: Array<{
     runId: string;
+    persisted: boolean;
     taskId: string;
     taskTitle: string;
     category: BenchmarkTaskDefinition["category"];
@@ -124,6 +127,7 @@ export function BenchmarkRunner() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [useLlmJudge, setUseLlmJudge] = useState(false);
+  const { providerConfig, isConfigured, isReady } = useLocalApiConfig();
 
   const selectedTasks = useMemo(
     () =>
@@ -145,6 +149,7 @@ export function BenchmarkRunner() {
           taskIds: selectedTaskIds,
           modes: selectedModes,
           useLlmJudge,
+          providerConfig: providerConfig ?? undefined,
         }),
       });
 
@@ -192,6 +197,30 @@ export function BenchmarkRunner() {
           <TriangleAlert className="size-4" aria-hidden="true" />
           <AlertTitle>Benchmark failed</AlertTitle>
           <AlertDescription>{errorMessage}</AlertDescription>
+        </Alert>
+      ) : null}
+
+      {isReady ? (
+        <Alert>
+          <Sparkles className="size-4" aria-hidden="true" />
+          <AlertTitle>
+            {isConfigured ? "Benchmark will use your browser API config" : "Add an API config on the homepage first"}
+          </AlertTitle>
+          <AlertDescription>
+            {isConfigured
+              ? `Selected tasks will call ${providerConfig?.provider} with the local credentials saved on the homepage.`
+              : "Without a homepage API config, benchmark runs still depend on server environment variables and may return no result online."}
+          </AlertDescription>
+        </Alert>
+      ) : null}
+
+      {result && !result.persisted ? (
+        <Alert>
+          <TriangleAlert className="size-4" aria-hidden="true" />
+          <AlertTitle>Transient benchmark results</AlertTitle>
+          <AlertDescription>
+            Database persistence is not configured, so this benchmark ran successfully but the rows below are not saved to <span className="font-mono">/runs/[id]</span>.
+          </AlertDescription>
         </Alert>
       ) : null}
 
@@ -323,7 +352,8 @@ export function BenchmarkRunner() {
                     </Label>
                     <p className="text-xs leading-5 text-muted-foreground">
                       Optional second model pass for rubric scores. Requires{" "}
-                      <span className="font-mono">OPENAI_API_KEY</span>; falls back to heuristic if
+                      <span className="font-mono">OPENAI_API_KEY</span> or{" "}
+                      <span className="font-mono">SILICONFLOW_API_KEY</span>; falls back to heuristic if
                       unavailable.
                     </p>
                   </div>
@@ -410,7 +440,7 @@ export function BenchmarkRunner() {
                             : "Draft + Verifier"}
                         </CardTitle>
                         <CardDescription>
-                          {aggregate.runCount} persisted benchmark runs
+                          {aggregate.runCount} {result.persisted ? "persisted" : "transient"} benchmark runs
                         </CardDescription>
                       </CardHeader>
                       <CardContent className="grid gap-3 text-sm">
@@ -472,7 +502,9 @@ export function BenchmarkRunner() {
             <CardHeader>
               <CardTitle>Run Results</CardTitle>
               <CardDescription>
-                Each row is persisted and links to the run detail route.
+                {result?.persisted
+                  ? "Each row is persisted and links to the run detail route."
+                  : "Rows are shown immediately even without a database; enable DATABASE_URL to get saved run detail links."}
               </CardDescription>
             </CardHeader>
             <CardContent className="overflow-x-auto">
@@ -575,12 +607,16 @@ export function BenchmarkRunner() {
                             : formatPercent(row.metrics.averageConfidenceScore)}
                         </TableCell>
                         <TableCell className="text-right">
-                          <Button asChild size="sm" variant="outline">
-                            <Link href={`/runs/${encodeURIComponent(row.runId)}`}>
-                              Open
-                              <ArrowRight className="size-4" aria-hidden="true" />
-                            </Link>
-                          </Button>
+                          {row.persisted ? (
+                            <Button asChild size="sm" variant="outline">
+                              <Link href={`/runs/${encodeURIComponent(row.runId)}`}>
+                                Open
+                                <ArrowRight className="size-4" aria-hidden="true" />
+                              </Link>
+                            </Button>
+                          ) : (
+                            <span className="text-sm text-muted-foreground">Transient</span>
+                          )}
                         </TableCell>
                       </TableRow>
                     ))}

@@ -15,6 +15,30 @@ export function hasOpenAiApiKey(): boolean {
   return Boolean(process.env.OPENAI_API_KEY?.trim());
 }
 
+export function hasSiliconFlowApiKey(): boolean {
+  return Boolean(process.env.SILICONFLOW_API_KEY?.trim());
+}
+
+export function getConfiguredAiProvider(): "openai" | "siliconflow" {
+  const configured = process.env.AI_PROVIDER?.trim().toLowerCase();
+
+  if (configured === "openai" || configured === "siliconflow") {
+    return configured;
+  }
+
+  if (hasSiliconFlowApiKey()) {
+    return "siliconflow";
+  }
+
+  return "openai";
+}
+
+export function hasAiProviderCredentials(): boolean {
+  return getConfiguredAiProvider() === "siliconflow"
+    ? hasSiliconFlowApiKey()
+    : hasOpenAiApiKey();
+}
+
 /**
  * Canonical public URL for links and metadata.
  * Prefer NEXT_PUBLIC_APP_URL; on Vercel fall back to VERCEL_URL.

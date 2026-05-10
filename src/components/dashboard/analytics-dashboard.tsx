@@ -56,6 +56,12 @@ const currency = new Intl.NumberFormat("en-US", {
   maximumFractionDigits: 4,
 });
 
+const dateTime = new Intl.DateTimeFormat("en-US", {
+  dateStyle: "medium",
+  timeStyle: "short",
+  timeZone: "UTC",
+});
+
 export function AnalyticsDashboard({ payload }: AnalyticsDashboardProps) {
   const { overview, source, comparison } = payload;
 
@@ -346,7 +352,7 @@ export function AnalyticsDashboard({ payload }: AnalyticsDashboardProps) {
                     <TableCell className="max-w-[220px]">
                       <div className="truncate font-medium">{row.name}</div>
                       <div className="text-xs text-muted-foreground">
-                        {new Date(row.createdAt).toLocaleString()}
+                        {formatTimestamp(row.createdAt)}
                       </div>
                     </TableCell>
                     <TableCell>
@@ -372,6 +378,10 @@ export function AnalyticsDashboard({ payload }: AnalyticsDashboardProps) {
       </Card>
     </div>
   );
+}
+
+function formatTimestamp(value: string) {
+  return `${dateTime.format(new Date(value))} UTC`;
 }
 
 function StatCard({

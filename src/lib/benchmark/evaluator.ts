@@ -1,6 +1,8 @@
 import { generateText } from "ai";
-import { openai } from "@ai-sdk/openai";
 
+import type { ApiProviderConfigInput } from "@/lib/ai/config";
+import { getDefaultAgentModels, getLanguageModel } from "@/lib/ai/provider";
+import { hasAiProviderCredentials } from "@/lib/ai/provider";
 import type { BenchmarkTaskDefinition } from "@/lib/benchmark/tasks";
 
 /**
@@ -47,10 +49,11 @@ export type BenchmarkEvaluationResult = StructuredEvaluationScores & {
 };
 
 export type EvaluateBenchmarkOptions = {
-  /** When true, call a judge model (requires OPENAI_API_KEY). Falls back to heuristic if the call fails. */
+  /** When true, call a judge model (requires configured AI provider credentials). Falls back to heuristic if the call fails. */
   useLlmJudge?: boolean;
-  /** OpenAI model id passed to the AI SDK (default: gpt-4o-mini). */
+  /** AI SDK-compatible model id for the configured provider. */
   judgeModel?: string;
+  providerConfig?: ApiProviderConfigInput;
 };
 
 const STOPWORDS = new Set([
@@ -228,6 +231,7 @@ const judgeResponseSchemaHint = `{
   "toolUseScore": number,
   "explanation": string
 }`;
+const MAX_JUDGE_OUTPUT_TOKENS = 220;
 
 function buildJudgePrompt(input: BenchmarkEvaluationInput, toolErrorRate: number) {
   return [
@@ -297,8 +301,9 @@ function parseJudgeJson(text: string): StructuredEvaluationScores | null {
 async function evaluateBenchmarkLlm(
   input: BenchmarkEvaluationInput,
   judgeModel: string,
+  providerConfig?: ApiProviderConfigInput,
 ): Promise<StructuredEvaluationScores | null> {
-  if (!process.env.OPENAI_API_KEY) {
+  if (!hasAiProviderCredentials(providerConfig)) {
     return null;
   }
 
@@ -308,8 +313,9 @@ async function evaluateBenchmarkLlm(
 
   try {
     const { text } = await generateText({
-      model: openai(judgeModel),
+      model: getLanguageModel(judgeModel, providerConfig),
       prompt: buildJudgePrompt(input, toolErrorRate),
+      maxOutputTokens: MAX_JUDGE_OUTPUT_TOKENS,
       temperature: 0.1,
     });
 
@@ -329,8 +335,13 @@ export async function evaluateBenchmarkRun(
     return { ...heuristic, method: "heuristic" };
   }
 
-  const judgeModel = options.judgeModel ?? "gpt-4o-mini";
-  const llm = await evaluateBenchmarkLlm(input, judgeModel);
+  const judgeModel =
+    options.judgeModel ?? getDefaultAgentModels(options.providerConfig).judge;
+  const llm = await evaluateBenchmarkLlm(
+    input,
+    judgeModel,
+    options.providerConfig,
+  );
 
   if (llm) {
     return { ...llm, method: "llm_judge" };

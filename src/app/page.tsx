@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 
 import { PageHeader } from "@/components/app/page-header";
+import { ApiConfigCard } from "@/components/home/api-config-card";
 import { StatGrid } from "@/components/app/stat-grid";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -121,7 +122,7 @@ export default function Home() {
               "Recharts",
               "Prisma",
               "Vercel AI SDK",
-              "OpenAI provider",
+              "OpenAI-compatible provider",
             ].map((item) => (
               <Badge key={item} variant="secondary" className="rounded-md px-2.5 py-1 text-xs">
                 {item}
@@ -135,6 +136,8 @@ export default function Home() {
           </CardContent>
         </Card>
       </section>
+
+      <ApiConfigCard />
 
       <Card>
         <CardHeader>

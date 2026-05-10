@@ -40,9 +40,47 @@ type RunDetailPageProps = {
   params: Promise<{ id: string }>;
 };
 
+function DemoRunFallback({ displayId }: { displayId: string }) {
+  return (
+    <div className="flex flex-col gap-6">
+      <PageHeader
+        eyebrow="Run Detail"
+        title="演示模式（示例 Run）"
+        description="当前链接用于展示 Run Detail 的版式与信息结构。配置数据库并实际运行 benchmark 后，这里会展示真实的执行结果、工具轨迹和评分。"
+      />
+      <Card>
+        <CardContent className="grid gap-3 pt-6 text-sm leading-6 text-muted-foreground">
+          <p>
+            如果要查看真实运行记录，请先配置 <span className="font-mono">DATABASE_URL</span>，然后在{" "}
+            <span className="font-mono">/benchmark</span> 发起一次运行。
+          </p>
+          <p className="text-xs">
+            Requested id: <span className="font-mono">{displayId}</span>
+          </p>
+        </CardContent>
+      </Card>
+      <div className="flex flex-wrap gap-2">
+        <Button asChild variant="outline">
+          <Link href="/dashboard">
+            <ArrowLeft className="size-4" aria-hidden="true" />
+            查看仪表盘
+          </Link>
+        </Button>
+        <Button asChild variant="outline">
+          <Link href="/benchmark">Benchmark</Link>
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 export async function generateMetadata({ params }: RunDetailPageProps): Promise<Metadata> {
   const { id } = await params;
   const displayId = decodeURIComponent(id);
+
+  if (displayId === "demo-run") {
+    return { title: "Demo run · SpecAgent Lab" };
+  }
 
   if (!isDatabaseConfigured()) {
     return { title: `Run · SpecAgent Lab` };
@@ -67,6 +105,10 @@ export async function generateMetadata({ params }: RunDetailPageProps): Promise<
 export default async function RunDetailPage({ params }: RunDetailPageProps) {
   const { id } = await params;
   const displayId = decodeURIComponent(id);
+
+  if (displayId === "demo-run") {
+    return <DemoRunFallback displayId={displayId} />;
+  }
 
   if (!isDatabaseConfigured()) {
     return (

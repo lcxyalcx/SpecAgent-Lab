@@ -20,6 +20,9 @@ import {
   benchmarkTaskLibrary,
   type BenchmarkTaskDefinition,
 } from "@/lib/benchmark/tasks";
+import { sanitizeApiProviderConfig } from "@/lib/ai/config";
+import type { ApiProviderConfigInput } from "@/lib/ai/config";
+import { getDefaultAgentModels } from "@/lib/ai/provider";
 import { getPrisma } from "@/lib/db";
 
 export type BenchmarkMode = "baseline" | "draft_verifier";
@@ -27,8 +30,10 @@ export type BenchmarkMode = "baseline" | "draft_verifier";
 export type BenchmarkRunnerInput = {
   taskIds: string[];
   modes: BenchmarkMode[];
-  /** When set, scores also come from an LLM judge (requires OPENAI_API_KEY). */
+  /** When set, scores also come from an LLM judge (requires a configured model provider). */
   useLlmJudge?: boolean;
+  providerConfig?: ApiProviderConfigInput;
+  persistRuns?: boolean;
 };
 
 export type BenchmarkRunMetrics = {
@@ -47,6 +52,7 @@ export type BenchmarkRunMetrics = {
 
 export type BenchmarkRunRow = {
   runId: string;
+  persisted: boolean;
   taskId: string;
   taskTitle: string;
   category: BenchmarkTaskDefinition["category"];
@@ -77,28 +83,58 @@ export type BenchmarkAggregateRow = {
 
 export type BenchmarkRunnerResult = {
   benchmarkId: string;
+  persisted: boolean;
   results: BenchmarkRunRow[];
   aggregates: BenchmarkAggregateRow[];
 };
 
-const DEFAULT_BASELINE_MODEL = "gpt-5.4";
-const DEFAULT_DRAFT_MODEL = "gpt-5.4-mini";
-const DEFAULT_VERIFIER_MODEL = "gpt-5.4";
-
 export async function runBenchmark(
   input: BenchmarkRunnerInput,
 ): Promise<BenchmarkRunnerResult> {
-  const prisma = getPrisma();
   const useLlmJudge = input.useLlmJudge === true;
+  const defaultModels = getDefaultAgentModels(input.providerConfig);
   const benchmarkId = `bench_${Date.now()}`;
   const tasks = benchmarkTaskLibrary.filter((task) => input.taskIds.includes(task.id));
-  const modeConfigs = await createModeConfigs(input.modes);
-  const persistedTaskMap = new Map<string, PrismaBenchmarkTask>();
+  let persistenceContext: {
+    prisma: ReturnType<typeof getPrisma>;
+    modeConfigs: Map<BenchmarkMode, AgentConfig>;
+  } | null = null;
+
+  if (input.persistRuns === true) {
+    try {
+      const prisma = getPrisma();
+      const modeConfigs = await createModeConfigs(
+        prisma,
+        input.modes,
+        input.providerConfig,
+      );
+      persistenceContext = { prisma, modeConfigs };
+    } catch (error) {
+      console.error("Benchmark persistence unavailable", {
+        error: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  }
+
   const results: BenchmarkRunRow[] = [];
 
   for (const task of tasks) {
-    const persistedTask = await ensureBenchmarkTaskRecord(task);
-    persistedTaskMap.set(task.id, persistedTask);
+    let persistedTask: PrismaBenchmarkTask | null = null;
+
+    if (persistenceContext) {
+      try {
+        persistedTask = await ensureBenchmarkTaskRecord(
+          persistenceContext.prisma,
+          task,
+        );
+      } catch (error) {
+        console.error("Benchmark task persistence failed", {
+          taskId: task.id,
+          error: error instanceof Error ? error.message : "Unknown error",
+        });
+        persistenceContext = null;
+      }
+    }
 
     for (const mode of input.modes) {
       const runResult =
@@ -106,88 +142,116 @@ export async function runBenchmark(
           ? await runBaselineAgent({
               systemPrompt: buildBenchmarkSystemPrompt(task, mode),
               userPrompt: buildBenchmarkUserPrompt(task),
-              model: DEFAULT_BASELINE_MODEL,
+              model: defaultModels.baseline,
               enabledTools: defaultEnabledToolsForTask(task),
               benchmarkTaskId: task.id,
+              providerConfig: input.providerConfig,
             })
           : await runDraftVerifierAgent({
               systemPrompt: buildBenchmarkSystemPrompt(task, mode),
               userPrompt: buildBenchmarkUserPrompt(task),
-              draftModel: DEFAULT_DRAFT_MODEL,
-              verifierModel: DEFAULT_VERIFIER_MODEL,
+              draftModel: defaultModels.draft,
+              verifierModel: defaultModels.verifier,
               enabledTools: defaultEnabledToolsForTask(task),
               benchmarkTaskId: task.id,
+              providerConfig: input.providerConfig,
             });
 
-      const metrics = await buildBenchmarkMetrics(task, mode, runResult, useLlmJudge);
-      const persistedRun = await prisma.run.create({
-        data: {
-          name: `${benchmarkId} · ${mode} · ${task.title}`,
-          agentConfigId: modeConfigs.get(mode)!.id,
-          benchmarkTaskId: persistedTask.id,
-          status:
-            runResult.status === "succeeded"
-              ? RunStatus.SUCCEEDED
-              : RunStatus.FAILED,
-          input: toJsonValue({
+      const metrics = await buildBenchmarkMetrics(
+        task,
+        mode,
+        runResult,
+        useLlmJudge,
+        input.providerConfig,
+      );
+      let runId = createTransientBenchmarkRunId(benchmarkId, mode, task.id);
+      let persisted = false;
+
+      if (persistenceContext && persistedTask) {
+        try {
+          const persistedRun = await persistenceContext.prisma.run.create({
+            data: {
+              name: `${benchmarkId} · ${mode} · ${task.title}`,
+              agentConfigId: persistenceContext.modeConfigs.get(mode)!.id,
+              benchmarkTaskId: persistedTask.id,
+              status:
+                runResult.status === "succeeded"
+                  ? RunStatus.SUCCEEDED
+                  : RunStatus.FAILED,
+              input: toJsonValue({
+                benchmarkId,
+                mode,
+                taskId: task.id,
+                taskTitle: task.title,
+                category: task.category,
+                difficulty: task.difficulty,
+                systemPrompt: buildBenchmarkSystemPrompt(task, mode),
+                userPrompt: buildBenchmarkUserPrompt(task),
+                enabledTools: defaultEnabledToolsForTask(task),
+                useLlmJudge,
+                providerConfig: sanitizeApiProviderConfig(input.providerConfig),
+              }),
+              output: toJsonValue(buildRunOutput(runResult)),
+              summary: toJsonValue({
+                benchmarkId,
+                mode,
+                taskSuccessScore: metrics.taskSuccessScore,
+                evaluationMethod: metrics.evaluationMethod,
+                evaluationExplanation: metrics.evaluationExplanation,
+                reasoningQualityScore: metrics.reasoningQualityScore,
+                constraintSatisfactionScore: metrics.constraintSatisfactionScore,
+                toolUseScore: metrics.toolUseScore,
+                verifierReason:
+                  isDraftVerifierRunResult(runResult) ? runResult.verifier.reason : null,
+                draftAccepted:
+                  isDraftVerifierRunResult(runResult) ? runResult.metrics.draftAccepted : null,
+              }),
+              metrics: toJsonValue({
+                ...metrics,
+                toolCallCount: runResult.metrics.toolCallCount,
+                toolErrorCount: runResult.metrics.toolErrorCount,
+                totalTokens: runResult.metrics.totalTokens,
+              }),
+              startedAt: new Date(runResult.startedAt),
+              finishedAt: new Date(runResult.finishedAt),
+            },
+          });
+
+          if (runResult.toolCalls.length > 0) {
+            await persistenceContext.prisma.toolCall.createMany({
+              data: runResult.toolCalls.map((toolCall, index) => ({
+                runId: persistedRun.id,
+                toolName: toolCall.toolName,
+                sequence: index + 1,
+                status: toolCall.success
+                  ? ToolCallStatus.SUCCEEDED
+                  : ToolCallStatus.FAILED,
+                input: toJsonValue(toolCall.input),
+                output: toJsonValue(toolCall.output),
+                error: toJsonValue(
+                  toolCall.error ? { message: toolCall.error } : null,
+                ),
+                latencyMs: toolCall.latencyMs,
+              })),
+            });
+          }
+
+          runId = persistedRun.id;
+          persisted = true;
+        } catch (error) {
+          console.error("Benchmark run persistence failed", {
             benchmarkId,
             mode,
             taskId: task.id,
-            taskTitle: task.title,
-            category: task.category,
-            difficulty: task.difficulty,
-            systemPrompt: buildBenchmarkSystemPrompt(task, mode),
-            userPrompt: buildBenchmarkUserPrompt(task),
-            enabledTools: defaultEnabledToolsForTask(task),
-            useLlmJudge,
-          }),
-          output: toJsonValue(buildRunOutput(runResult)),
-          summary: toJsonValue({
-            benchmarkId,
-            mode,
-            taskSuccessScore: metrics.taskSuccessScore,
-            evaluationMethod: metrics.evaluationMethod,
-            evaluationExplanation: metrics.evaluationExplanation,
-            reasoningQualityScore: metrics.reasoningQualityScore,
-            constraintSatisfactionScore: metrics.constraintSatisfactionScore,
-            toolUseScore: metrics.toolUseScore,
-            verifierReason:
-              isDraftVerifierRunResult(runResult) ? runResult.verifier.reason : null,
-            draftAccepted:
-              isDraftVerifierRunResult(runResult) ? runResult.metrics.draftAccepted : null,
-          }),
-          metrics: toJsonValue({
-            ...metrics,
-            toolCallCount: runResult.metrics.toolCallCount,
-            toolErrorCount: runResult.metrics.toolErrorCount,
-            totalTokens: runResult.metrics.totalTokens,
-          }),
-          startedAt: new Date(runResult.startedAt),
-          finishedAt: new Date(runResult.finishedAt),
-        },
-      });
-
-      if (runResult.toolCalls.length > 0) {
-        await prisma.toolCall.createMany({
-          data: runResult.toolCalls.map((toolCall, index) => ({
-            runId: persistedRun.id,
-            toolName: toolCall.toolName,
-            sequence: index + 1,
-            status: toolCall.success
-              ? ToolCallStatus.SUCCEEDED
-              : ToolCallStatus.FAILED,
-            input: toJsonValue(toolCall.input),
-            output: toJsonValue(toolCall.output),
-            error: toJsonValue(
-              toolCall.error ? { message: toolCall.error } : null,
-            ),
-            latencyMs: toolCall.latencyMs,
-          })),
-        });
+            error: error instanceof Error ? error.message : "Unknown error",
+          });
+          persistenceContext = null;
+        }
       }
 
       results.push({
-        runId: persistedRun.id,
+        runId,
+        persisted,
         taskId: task.id,
         taskTitle: task.title,
         category: task.category,
@@ -209,14 +273,19 @@ export async function runBenchmark(
 
   return {
     benchmarkId,
+    persisted: results.length > 0 && results.every((result) => result.persisted),
     results,
     aggregates: buildAggregates(results),
   };
 }
 
-async function createModeConfigs(modes: BenchmarkMode[]) {
-  const prisma = getPrisma();
+async function createModeConfigs(
+  prisma: ReturnType<typeof getPrisma>,
+  modes: BenchmarkMode[],
+  providerConfig?: ApiProviderConfigInput,
+) {
   const configs = new Map<BenchmarkMode, AgentConfig>();
+  const defaultModels = getDefaultAgentModels(providerConfig);
 
   for (const mode of modes) {
     const config = await prisma.agentConfig.create({
@@ -228,8 +297,8 @@ async function createModeConfigs(modes: BenchmarkMode[]) {
         mode: mode === "baseline" ? AgentMode.BASELINE : AgentMode.DRAFT_VERIFIER,
         model:
           mode === "baseline"
-            ? DEFAULT_BASELINE_MODEL
-            : `${DEFAULT_DRAFT_MODEL} -> ${DEFAULT_VERIFIER_MODEL}`,
+            ? defaultModels.baseline
+            : `${defaultModels.draft} -> ${defaultModels.verifier}`,
         systemPrompt:
           mode === "baseline"
             ? "Benchmark baseline configuration for multi-turn agent evaluation."
@@ -238,6 +307,7 @@ async function createModeConfigs(modes: BenchmarkMode[]) {
         toolConfig: toJsonValue({
           source: "benchmark-runner",
           mode,
+          providerConfig: sanitizeApiProviderConfig(providerConfig),
         }),
       },
     });
@@ -248,8 +318,10 @@ async function createModeConfigs(modes: BenchmarkMode[]) {
   return configs;
 }
 
-async function ensureBenchmarkTaskRecord(task: BenchmarkTaskDefinition) {
-  const prisma = getPrisma();
+async function ensureBenchmarkTaskRecord(
+  prisma: ReturnType<typeof getPrisma>,
+  task: BenchmarkTaskDefinition,
+) {
   const existing = await prisma.benchmarkTask.findUnique({
     where: { slug: task.id },
   });
@@ -278,6 +350,14 @@ async function ensureBenchmarkTaskRecord(task: BenchmarkTaskDefinition) {
       }),
     },
   });
+}
+
+function createTransientBenchmarkRunId(
+  benchmarkId: string,
+  mode: BenchmarkMode,
+  taskId: string,
+) {
+  return `${benchmarkId}_${mode}_${taskId}`;
 }
 
 function buildBenchmarkSystemPrompt(
@@ -326,6 +406,7 @@ async function buildBenchmarkMetrics(
   mode: BenchmarkMode,
   runResult: RunResult | DraftVerifierRunResult,
   useLlmJudge: boolean,
+  providerConfig?: ApiProviderConfigInput,
 ): Promise<BenchmarkRunMetrics> {
   const evaluation = await evaluateBenchmarkRun(
     {
@@ -343,7 +424,7 @@ async function buildBenchmarkMetrics(
           }
         : null,
     },
-    { useLlmJudge },
+    { useLlmJudge, providerConfig },
   );
 
   const toolErrorRate =

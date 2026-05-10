@@ -1,4 +1,3 @@
-import { openai } from "@ai-sdk/openai";
 import { generateObject, generateText, stepCountIs } from "ai";
 import { z } from "zod";
 
@@ -7,6 +6,8 @@ import {
   type RunResult,
   type RunToolCallRecord,
 } from "@/lib/agents/baseline-agent";
+import type { ApiProviderConfigInput } from "@/lib/ai/config";
+import { getLanguageModel } from "@/lib/ai/provider";
 import { specAgentTools } from "@/lib/tools";
 
 const MODEL_PRICING_USD_PER_1M_TOKENS: Record<
@@ -27,6 +28,9 @@ const MODEL_PRICING_USD_PER_1M_TOKENS: Record<
 
 const DEFAULT_MODEL_PRICING = { input: 1, output: 4 };
 const MAX_AGENT_STEPS = 6;
+const MAX_DRAFT_OUTPUT_TOKENS = 220;
+const MAX_VERIFIER_REVIEW_TOKENS = 120;
+const MAX_VERIFIER_OUTPUT_TOKENS = 320;
 
 const draftOutputSchema = z.object({
   draftAnswer: z.string().min(1),
@@ -40,6 +44,9 @@ const verifierReviewSchema = z.object({
   confidenceScore: z.number().min(0).max(1),
 });
 
+const draftSchemaHint = `{"draftAnswer":"string","draftPlan":["string"],"expectedToolCalls":["string"]}`;
+const verifierSchemaHint = `{"decision":"accept|revise|reject","reason":"string","confidenceScore":0.0}`;
+
 export type DraftVerifierAgentInput = {
   systemPrompt: string;
   userPrompt: string;
@@ -47,6 +54,7 @@ export type DraftVerifierAgentInput = {
   verifierModel: string;
   enabledTools: EnabledToolName[];
   benchmarkTaskId?: string;
+  providerConfig?: ApiProviderConfigInput;
 };
 
 export type DraftVerifierRunResult = RunResult & {
@@ -97,14 +105,16 @@ export async function runDraftVerifierAgent(
 
   try {
     const draftStartedAt = Date.now();
-    const draftResult = await generateObject({
-      model: openai(input.draftModel),
+    const draftResult = await generateStructuredObject({
+      model: getLanguageModel(input.draftModel, input.providerConfig),
       system: buildDraftSystemPrompt(input.systemPrompt),
       prompt: buildDraftPrompt(input.userPrompt, activeTools),
+      maxOutputTokens: MAX_DRAFT_OUTPUT_TOKENS,
       schema: draftOutputSchema,
       schemaName: "draft_agent_result",
       schemaDescription:
         "Draft answer, short plan, and expected tool calls for a speculative-style draft-verifier workflow.",
+      jsonShapeHint: draftSchemaHint,
     });
     draftLatencyMs = Date.now() - draftStartedAt;
     draftAnswer = draftResult.object.draftAnswer;
@@ -122,8 +132,8 @@ export async function runDraftVerifierAgent(
     estimatedCostUsd += estimateCostUsd(input.draftModel, normalizedDraftUsage);
 
     const verifierStartedAt = Date.now();
-    const verifierReview = await generateObject({
-      model: openai(input.verifierModel),
+    const verifierReview = await generateStructuredObject({
+      model: getLanguageModel(input.verifierModel, input.providerConfig),
       system: buildVerifierSystemPrompt(input.systemPrompt),
       prompt: buildVerifierReviewPrompt({
         userPrompt: input.userPrompt,
@@ -131,10 +141,12 @@ export async function runDraftVerifierAgent(
         draftPlan,
         expectedToolCalls,
       }),
+      maxOutputTokens: MAX_VERIFIER_REVIEW_TOKENS,
       schema: verifierReviewSchema,
       schemaName: "verifier_review_result",
       schemaDescription:
         "Verifier decision for a speculative-style draft-verifier workflow. This is not token-level speculative decoding.",
+      jsonShapeHint: verifierSchemaHint,
     });
 
     decision = verifierReview.object.decision;
@@ -159,7 +171,7 @@ export async function runDraftVerifierAgent(
       verifierLatencyMs = Date.now() - verifierStartedAt;
     } else {
       const revisionResult = await generateText({
-        model: openai(input.verifierModel),
+        model: getLanguageModel(input.verifierModel, input.providerConfig),
         system: buildVerifierSystemPrompt(input.systemPrompt),
         prompt: buildVerifierRevisionPrompt({
           userPrompt: input.userPrompt,
@@ -169,6 +181,7 @@ export async function runDraftVerifierAgent(
           decision,
           reason,
         }),
+        maxOutputTokens: MAX_VERIFIER_OUTPUT_TOKENS,
         tools: specAgentTools,
         activeTools,
         stopWhen: stepCountIs(MAX_AGENT_STEPS),
@@ -313,6 +326,76 @@ function buildDraftSystemPrompt(systemPrompt: string) {
     "This is not token-level speculative decoding.",
     "Generate a concise draft answer, a short plan, and expected tool calls that a stronger verifier can audit.",
   ].join("\n\n");
+}
+
+async function generateStructuredObject<TOutput>({
+  model,
+  system,
+  prompt,
+  maxOutputTokens,
+  schema,
+  schemaName,
+  schemaDescription,
+  jsonShapeHint,
+}: {
+  model: ReturnType<typeof getLanguageModel>;
+  system: string;
+  prompt: string;
+  maxOutputTokens: number;
+  schema: z.ZodType<TOutput>;
+  schemaName: string;
+  schemaDescription: string;
+  jsonShapeHint: string;
+}) {
+  try {
+    return await generateObject({
+      model,
+      system,
+      prompt,
+      maxOutputTokens,
+      schema,
+      schemaName,
+      schemaDescription,
+    });
+  } catch {
+    const fallback = await generateText({
+      model,
+      system: [
+        system,
+        "Return only valid JSON with no markdown, code fences, or extra narration.",
+        `JSON shape: ${jsonShapeHint}`,
+      ].join("\n\n"),
+      prompt,
+      maxOutputTokens,
+    });
+
+    const parsed = schema.safeParse(extractJsonObject(fallback.text));
+    if (!parsed.success) {
+      throw new Error("No object generated: could not parse the response.");
+    }
+
+    return {
+      object: parsed.data,
+      usage: {
+        inputTokens: fallback.totalUsage.inputTokens,
+        outputTokens: fallback.totalUsage.outputTokens,
+      },
+    };
+  }
+}
+
+function extractJsonObject(text: string): unknown {
+  const trimmed = text.trim();
+  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const candidate = fenced?.[1]?.trim() || trimmed;
+  const start = candidate.indexOf("{");
+  const end = candidate.lastIndexOf("}");
+
+  if (start === -1 || end === -1 || end < start) {
+    throw new Error("No JSON object found in model response.");
+  }
+
+  return JSON.parse(candidate.slice(start, end + 1));
 }
 
 function buildDraftPrompt(userPrompt: string, activeTools: EnabledToolName[]) {

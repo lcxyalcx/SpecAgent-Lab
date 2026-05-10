@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { apiProviderConfigSchema } from "@/lib/ai/config";
+import { getAiProvider, hasAiProviderCredentials } from "@/lib/ai/provider";
 import { runBenchmark } from "@/lib/benchmark/runner";
 import { benchmarkTaskLibrary } from "@/lib/benchmark/tasks";
-import { hasOpenAiApiKey, isDatabaseConfigured } from "@/lib/env";
+import { isDatabaseConfigured } from "@/lib/env";
 
 const benchmarkRunRequestSchema = z.object({
   taskIds: z
@@ -15,6 +17,7 @@ const benchmarkRunRequestSchema = z.object({
     .min(1)
     .max(2),
   useLlmJudge: z.boolean().optional(),
+  providerConfig: apiProviderConfigSchema.optional(),
 });
 
 export async function POST(request: Request) {
@@ -43,9 +46,10 @@ export async function POST(request: Request) {
     );
   }
 
-  const { taskIds, modes, useLlmJudge } = parsedRequest.data;
+  const { taskIds, modes, useLlmJudge, providerConfig } = parsedRequest.data;
   const validTaskIds = new Set(benchmarkTaskLibrary.map((task) => task.id));
   const invalidTaskIds = taskIds.filter((taskId) => !validTaskIds.has(taskId));
+  const provider = getAiProvider(providerConfig);
 
   if (invalidTaskIds.length > 0) {
     return NextResponse.json(
@@ -57,23 +61,17 @@ export async function POST(request: Request) {
     );
   }
 
-  if (!isDatabaseConfigured()) {
+  if (!hasAiProviderCredentials(providerConfig)) {
     return NextResponse.json(
       {
         error:
-          "Database is not configured. Set DATABASE_URL (e.g. Vercel Postgres or Neon) to persist benchmark runs.",
-        code: "DATABASE_NOT_CONFIGURED",
-      },
-      { status: 503 },
-    );
-  }
-
-  if (!hasOpenAiApiKey()) {
-    return NextResponse.json(
-      {
-        error:
-          "OPENAI_API_KEY is not set. Add it in environment variables to run benchmark agents against OpenAI.",
-        code: "OPENAI_NOT_CONFIGURED",
+          provider === "siliconflow"
+            ? "SILICONFLOW_API_KEY is not set. Add it in environment variables or save it from the homepage API configuration card."
+            : "OPENAI_API_KEY is not set. Add it in environment variables or save it from the homepage API configuration card.",
+        code:
+          provider === "siliconflow"
+            ? "SILICONFLOW_NOT_CONFIGURED"
+            : "OPENAI_NOT_CONFIGURED",
       },
       { status: 503 },
     );
@@ -84,6 +82,8 @@ export async function POST(request: Request) {
       taskIds,
       modes,
       useLlmJudge,
+      providerConfig,
+      persistRuns: isDatabaseConfigured(),
     });
 
     return NextResponse.json(result);

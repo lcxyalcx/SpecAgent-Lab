@@ -34,6 +34,7 @@ import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { useLocalApiConfig } from "@/hooks/use-local-api-config";
 import { cn } from "@/lib/utils";
 
 const toolOptions = [
@@ -73,6 +74,9 @@ const modeOptions = [
 ] as const;
 
 const modelOptions = [
+  "Qwen/Qwen2-7B-Instruct",
+  "Qwen/Qwen2.5-7B-Instruct",
+  "deepseek-ai/DeepSeek-V3",
   "gpt-5.4",
   "gpt-5.4-mini",
   "gpt-4.1",
@@ -85,6 +89,7 @@ type EnabledTool = (typeof toolOptions)[number]["id"];
 
 type PlaygroundRunResponse = {
   runId: string;
+  persisted: boolean;
   mode: Mode;
   status: "succeeded" | "failed";
   output: string;
@@ -168,9 +173,9 @@ const defaultFormState: FormState = {
     "You are an evaluation-ready product agent. Use deterministic tools carefully, explain tradeoffs clearly, and optimize for reliable benchmark performance.",
   userPrompt:
     "Recommend a laptop for frequent travel, light coding, and strong battery life. Stay under $1,400 and explain the tradeoffs.",
-  model: "gpt-5.4",
-  draftModel: "gpt-5.4-mini",
-  verifierModel: "gpt-5.4",
+  model: "deepseek-ai/DeepSeek-V3",
+  draftModel: "deepseek-ai/DeepSeek-V3",
+  verifierModel: "deepseek-ai/DeepSeek-V3",
   enabledTools: ["productDb", "mockSearch", "calculator"],
 };
 
@@ -186,6 +191,7 @@ export function AgentPlayground() {
   const [runResult, setRunResult] = useState<PlaygroundRunResponse | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const { providerConfig, isConfigured, isReady } = useLocalApiConfig();
 
   const selectedToolCount = formState.enabledTools.length;
 
@@ -226,6 +232,7 @@ export function AgentPlayground() {
               ? formState.verifierModel
               : undefined,
           enabledTools: formState.enabledTools,
+          providerConfig: providerConfig ?? undefined,
         }),
       });
 
@@ -512,13 +519,37 @@ export function AgentPlayground() {
         </Card>
 
         <div className="flex min-w-0 flex-col gap-5">
-          {errorMessage ? (
-            <Alert variant="destructive">
-              <TriangleAlert className="size-4" aria-hidden="true" />
-              <AlertTitle>Run failed</AlertTitle>
-              <AlertDescription>{errorMessage}</AlertDescription>
-            </Alert>
-          ) : null}
+      {errorMessage ? (
+        <Alert variant="destructive">
+          <TriangleAlert className="size-4" aria-hidden="true" />
+          <AlertTitle>Run failed</AlertTitle>
+          <AlertDescription>{errorMessage}</AlertDescription>
+        </Alert>
+      ) : null}
+
+      {isReady ? (
+        <Alert>
+          <Sparkles className="size-4" aria-hidden="true" />
+          <AlertTitle>
+            {isConfigured ? "Using browser API configuration" : "No browser API configuration found"}
+          </AlertTitle>
+          <AlertDescription>
+            {isConfigured
+              ? `This run will use your locally saved ${providerConfig?.provider} credentials from the homepage.`
+              : "Add an API key on the homepage first so playground runs can execute without relying on server environment variables."}
+          </AlertDescription>
+        </Alert>
+      ) : null}
+
+      {runResult && !runResult.persisted ? (
+        <Alert>
+          <TriangleAlert className="size-4" aria-hidden="true" />
+          <AlertTitle>Transient run</AlertTitle>
+          <AlertDescription>
+            This run completed successfully without a configured database, so it is shown in the playground only and not saved to <span className="font-mono">/runs/[id]</span>.
+          </AlertDescription>
+        </Alert>
+      ) : null}
 
           <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             <MetricCard
