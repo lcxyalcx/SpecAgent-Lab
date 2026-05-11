@@ -127,12 +127,12 @@ function normalizeDifficulty(value: unknown): string | number | undefined {
 
 function modeLabel(workflow: WorkflowMode, inputMode: string | undefined) {
   if (inputMode === "baseline" || workflow === "baseline") {
-    return "Baseline（单智能体）";
+    return "单代理";
   }
   if (inputMode === "draft_verifier" || workflow === "draft_verifier") {
-    return "Draft + Verifier（推测式工作流）";
+    return "草稿 + 校验";
   }
-  return "其它 / Playground";
+  return "其它 / 试运行";
 }
 
 export function buildRunDetailViewModel(row: {
@@ -306,7 +306,7 @@ export function buildRunDetailViewModel(row: {
       draftPlan: [],
       expectedToolCalls: [],
       verifierDecision: summaryVerifierDecision ?? "—",
-      verifierReason: summaryVerifierReason ?? "（未记录详细 reason）",
+      verifierReason: summaryVerifierReason ?? "（未记录详细审核说明）",
       confidenceScore:
         firstNumber(summaryRec?.confidenceScore, metricsRec?.averageConfidenceScore) ?? 0,
       draftAccepted: summaryDraftAccepted,
@@ -428,7 +428,7 @@ export function buildTimelineSteps(vm: RunDetailViewModel): TimelineStep[] {
         : "";
     steps.push({
       kind: "draft",
-      title: "Draft 步骤",
+      title: "草稿阶段",
       body: `${vm.draftVerifier.draftAnswer}${plan}${tools}`,
       meta:
         vm.draftVerifier.draftLatencyMs != null
@@ -438,8 +438,8 @@ export function buildTimelineSteps(vm: RunDetailViewModel): TimelineStep[] {
   } else if (vm.workflowMode === "draft_verifier") {
     steps.push({
       kind: "note",
-      title: "Draft 步骤",
-      body: "本次运行未持久化完整草稿对象，仅可从最终输出与验证器摘要推断流程。",
+      title: "草稿阶段",
+      body: "本次运行未持久化完整草稿对象，只能从最终输出和审核摘要里反推流程。",
     });
   }
 
@@ -460,8 +460,8 @@ export function buildTimelineSteps(vm: RunDetailViewModel): TimelineStep[] {
       const reason = vm.draftVerifier.verifierReason.trim();
       steps.push({
         kind: "verifier",
-        title: "Verifier 步骤",
-        body: reason || `（无长文本 reason，决定：${vm.draftVerifier.verifierDecision}）`,
+        title: "审核阶段",
+        body: reason || `（未记录详细审核说明，当前决定：${vm.draftVerifier.verifierDecision}）`,
         meta: `决定：${vm.draftVerifier.verifierDecision} · 置信度 ${Math.round(vm.draftVerifier.confidenceScore * 100)}%${
           vm.draftVerifier.verifierLatencyMs != null
             ? ` · ${vm.draftVerifier.verifierLatencyMs} ms`
@@ -471,10 +471,10 @@ export function buildTimelineSteps(vm: RunDetailViewModel): TimelineStep[] {
     } else if (vm.summaryHints.verifierReason || vm.summaryHints.verifierDecision) {
       steps.push({
         kind: "verifier",
-        title: "Verifier 摘要",
+        title: "审核摘要",
         body:
           vm.summaryHints.verifierReason?.trim() ||
-          "（数据库 summary 中仅保留决策标记，无长文本 reason。）",
+          "（数据库 summary 中只保留了决策标记，没有更详细的审核说明。）",
         meta: vm.summaryHints.verifierDecision
           ? `决定：${vm.summaryHints.verifierDecision}`
           : undefined,
@@ -526,7 +526,7 @@ export function buildProductInterpretation(vm: RunDetailViewModel): string[] {
 
   if (vm.status === "SUCCEEDED" && vm.taskSuccessLabel === "strong") {
     lines.push(
-      `本次运行成功度较高（任务成功分约 ${successPct ?? "—"}%）：模型输出与评估 rubric 对齐较好，适合作为正面样本向面试官说明质量基线。`,
+      `本次运行表现较好（任务成功分约 ${successPct ?? "—"}%）：回答与评分标准整体一致，可以作为当前配置的稳定样本。`,
     );
   } else if (vm.status === "SUCCEEDED" && vm.taskSuccessLabel === "ok") {
     lines.push(
@@ -534,11 +534,11 @@ export function buildProductInterpretation(vm: RunDetailViewModel): string[] {
     );
   } else if (vm.status === "SUCCEEDED") {
     lines.push(
-      `尽管运行状态为成功，成功分偏低（约 ${successPct ?? "—"}%），说明自动化评估认为输出未充分满足 rubric，可结合工具 trace 排查。`,
+      `虽然运行状态为成功，但成功分偏低（约 ${successPct ?? "—"}%），说明当前回答还没有稳定满足要求，建议结合工具过程继续排查。`,
     );
   } else {
     lines.push(
-      "运行未成功完成（状态非 SUCCEEDED）：应优先查看错误信息与工具失败项，而不是解读最终回答质量。",
+      "这次运行没有成功完成，建议优先查看错误信息和工具失败项，而不是先解读回答质量。",
     );
   }
 
@@ -546,11 +546,11 @@ export function buildProductInterpretation(vm: RunDetailViewModel): string[] {
     const ok = vm.latencyMs <= LATENCY_OK_MS;
     lines.push(
       ok
-        ? `端到端延迟约 ${formatDuration(vm.latencyMs)}，在演示阈值（≤ ${LATENCY_OK_MS / 1000}s）内，可强调体验可接受。`
-        : `延迟约 ${formatDuration(vm.latencyMs)}，高于演示阈值（${LATENCY_OK_MS / 1000}s），适合用来讨论「质量—速度」权衡或并行/推测式优化。`,
+        ? `端到端耗时约 ${formatDuration(vm.latencyMs)}，处在当前参考阈值（≤ ${LATENCY_OK_MS / 1000}s）内，整体体验可接受。`
+        : `端到端耗时约 ${formatDuration(vm.latencyMs)}，高于当前参考阈值（${LATENCY_OK_MS / 1000}s），可以继续优化速度与稳定性。`,
     );
   } else {
-    lines.push("未记录可靠延迟，可在 benchmark 管线中确保写入 metrics.latencyMs 或起止时间。");
+    lines.push("暂未记录可靠耗时，建议在批量测试链路中确保写入 metrics.latencyMs 或起止时间。");
   }
 
   if (vm.toolCallCount === 0) {
@@ -561,33 +561,33 @@ export function buildProductInterpretation(vm: RunDetailViewModel): string[] {
     );
   } else {
     lines.push(
-      `工具调用存在明显摩擦（错误率约 ${Math.round((vm.toolErrorRate ?? 0) * 100)}%）：可能拖累成功率与延迟，适合作为「可靠性」访谈话题。`,
+      `工具调用存在明显摩擦（错误率约 ${Math.round((vm.toolErrorRate ?? 0) * 100)}%），很可能会拖累成功率和整体耗时。`,
     );
   }
 
   if (vm.workflowMode === "draft_verifier") {
     if (vm.draftVerifier) {
       if (vm.draftVerifier.draftAccepted === true) {
-        lines.push("草稿被接受：验证器认可 draft 方向，推测式工作流在成本/延迟上可能更优。");
+        lines.push("草稿被接受，说明初稿方向已经满足要求，草稿加校验模式有机会兼顾质量和效率。");
       } else if (vm.draftVerifier.draftAccepted === false) {
-        lines.push("草稿未被接受：验证器做了修订或拒绝，质量更有保障，但可能增加轮次与延迟。");
+        lines.push("草稿未被接受，说明审核阶段做了修订或拒绝，质量更稳一些，但也可能增加耗时。");
       } else {
         lines.push(
-          `验证器决定为「${vm.draftVerifier.verifierDecision}」：可结合 reason 字段向面试官解释人机协同策略。`,
+          `本次审核决定为「${vm.draftVerifier.verifierDecision}」，可以结合审核说明判断是策略问题还是提示词问题。`,
         );
       }
     } else if (vm.summaryHints.draftAcceptanceRate != null) {
       lines.push(
-        `指标中的草稿接受率约为 ${Math.round(vm.summaryHints.draftAcceptanceRate * 100)}%，可用于衡量推测式工作流的「一次过」程度。`,
+        `指标中的草稿接受率约为 ${Math.round(vm.summaryHints.draftAcceptanceRate * 100)}%，可以用来判断草稿阶段的一次命中程度。`,
       );
     }
     if (vm.summaryHints.verifierDecision && !vm.draftVerifier) {
       lines.push(
-        `Summary 中记录验证决策：${vm.summaryHints.verifierDecision}。可与延迟、成本一起说明权衡。`,
+        `摘要中记录了审核决定：${vm.summaryHints.verifierDecision}。可以和耗时、费用一起看这次权衡是否值得。`,
       );
     }
   } else if (vm.workflowMode === "baseline") {
-    lines.push("Baseline 模式：单智能体路径，适合作为对照组，与 draft-verifier 对比延迟与成本。");
+    lines.push("单代理模式适合作为默认方案或对照组，用来和草稿加校验比较质量、速度和成本。");
   }
 
   return lines;

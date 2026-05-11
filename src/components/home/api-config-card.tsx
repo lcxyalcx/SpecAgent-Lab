@@ -111,7 +111,7 @@ export function ApiConfigCard({ defaultProvider }: ApiConfigCardProps) {
     );
     window.dispatchEvent(new Event("specagent-api-config-changed"));
     setIsSaved(true);
-    setStatusMessage("已保存到当前浏览器，本地 Playground 和 Benchmark 会自动使用这组配置。");
+    setStatusMessage("已保存到当前浏览器，试运行和批量测试都会自动使用这组配置。");
   }
 
   function handleClear() {
@@ -132,7 +132,7 @@ export function ApiConfigCard({ defaultProvider }: ApiConfigCardProps) {
               API 配置
             </CardTitle>
             <CardDescription>
-              可以在这里填写你自己的模型供应商凭证。密钥仅保存在当前浏览器里，只有运行 Playground 或 Benchmark 时才会随请求发送。
+              可以在这里填写你自己的模型供应商凭证。密钥仅保存在当前浏览器里，只有开始试运行或批量测试时才会随请求发送。
             </CardDescription>
           </div>
           <Badge variant={isSaved ? "default" : "outline"} className="rounded-md">
@@ -208,10 +208,10 @@ export function ApiConfigCard({ defaultProvider }: ApiConfigCardProps) {
               首页统一管理
             </Badge>
             <Badge variant="outline" className="rounded-md">
-              Playground 可用
+              试运行可用
             </Badge>
             <Badge variant="outline" className="rounded-md">
-              Benchmark 可用
+              批量测试可用
             </Badge>
           </div>
         </div>

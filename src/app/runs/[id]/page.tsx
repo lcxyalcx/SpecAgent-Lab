@@ -44,18 +44,18 @@ function DemoRunFallback({ displayId }: { displayId: string }) {
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
-        eyebrow="Run Detail"
-        title="演示模式（示例 Run）"
-        description="当前链接用于展示 Run Detail 的版式与信息结构。配置数据库并实际运行 benchmark 后，这里会展示真实的执行结果、工具轨迹和评分。"
+        eyebrow="运行详情"
+        title="示例运行详情"
+        description="当前页面用于预览运行详情的布局。配置数据库并完成一次批量测试后，这里会展示真实回答、工具过程和评分结果。"
       />
       <Card>
         <CardContent className="grid gap-3 pt-6 text-sm leading-6 text-muted-foreground">
           <p>
             如果要查看真实运行记录，请先配置 <span className="font-mono">DATABASE_URL</span>，然后在{" "}
-            <span className="font-mono">/benchmark</span> 发起一次运行。
+            <span className="font-mono">/benchmark</span> 页面发起一次批量测试。
           </p>
           <p className="text-xs">
-            Requested id: <span className="font-mono">{displayId}</span>
+            请求 ID：<span className="font-mono">{displayId}</span>
           </p>
         </CardContent>
       </Card>
@@ -63,11 +63,11 @@ function DemoRunFallback({ displayId }: { displayId: string }) {
         <Button asChild variant="outline">
           <Link href="/dashboard">
             <ArrowLeft className="size-4" aria-hidden="true" />
-            查看仪表盘
+            查看结果总览
           </Link>
         </Button>
         <Button asChild variant="outline">
-          <Link href="/benchmark">Benchmark</Link>
+          <Link href="/benchmark">去批量测试</Link>
         </Button>
       </div>
     </div>
@@ -79,11 +79,11 @@ export async function generateMetadata({ params }: RunDetailPageProps): Promise<
   const displayId = decodeURIComponent(id);
 
   if (displayId === "demo-run") {
-    return { title: "Demo run · SpecAgent Lab" };
+    return { title: "示例运行 · SpecAgent Lab" };
   }
 
   if (!isDatabaseConfigured()) {
-    return { title: `Run · SpecAgent Lab` };
+    return { title: "运行详情 · SpecAgent Lab" };
   }
 
   try {
@@ -99,7 +99,7 @@ export async function generateMetadata({ params }: RunDetailPageProps): Promise<
     /* ignore */
   }
 
-  return { title: `Run ${displayId.slice(0, 8)}… · SpecAgent Lab` };
+  return { title: `运行 ${displayId.slice(0, 8)}… · SpecAgent Lab` };
 }
 
 export default async function RunDetailPage({ params }: RunDetailPageProps) {
@@ -114,19 +114,19 @@ export default async function RunDetailPage({ params }: RunDetailPageProps) {
     return (
       <div className="flex flex-col gap-6">
         <PageHeader
-          eyebrow="Run Detail"
-          title="演示模式（未配置数据库）"
-          description="Vercel 或本地未设置 DATABASE_URL 时，无法加载真实 Run。仪表盘仍可使用内置示例数据；配置 Postgres 后即可打开 benchmark 产生的 /runs/[id] 链接。"
+          eyebrow="运行详情"
+          title="暂时还没有可查看的运行详情"
+          description="当前环境还没有配置数据库，所以系统无法保存和读取真实运行记录。你仍然可以先使用示例数据熟悉界面。"
         />
         <Card>
           <CardContent className="grid gap-3 pt-6 text-sm leading-6 text-muted-foreground">
             <p>
               请在环境变量中设置 <span className="font-mono">DATABASE_URL</span>（如 Vercel Postgres、Neon），并执行{" "}
               <span className="font-mono">pnpm run db:push</span> 与{" "}
-              <span className="font-mono">pnpm run db:seed</span>（可选），再运行 Benchmark 生成可查看的运行记录。
+              <span className="font-mono">pnpm run db:seed</span>（可选），再运行一次批量测试生成可查看的历史记录。
             </p>
             <p className="text-xs">
-              Requested id: <span className="font-mono">{displayId}</span>
+              请求 ID：<span className="font-mono">{displayId}</span>
             </p>
           </CardContent>
         </Card>
@@ -134,11 +134,11 @@ export default async function RunDetailPage({ params }: RunDetailPageProps) {
           <Button asChild variant="outline">
             <Link href="/dashboard">
               <ArrowLeft className="size-4" aria-hidden="true" />
-              查看仪表盘（示例数据）
+              查看结果总览（示例数据）
             </Link>
           </Button>
           <Button asChild variant="outline">
-            <Link href="/benchmark">Benchmark</Link>
+            <Link href="/benchmark">去批量测试</Link>
           </Button>
         </div>
       </div>
@@ -162,7 +162,7 @@ export default async function RunDetailPage({ params }: RunDetailPageProps) {
       loadError = error.message;
     } else {
       loadError =
-        error instanceof Error ? error.message : "Unable to load run from database.";
+        error instanceof Error ? error.message : "暂时无法从数据库加载这次运行。";
     }
   }
 
@@ -170,9 +170,9 @@ export default async function RunDetailPage({ params }: RunDetailPageProps) {
     return (
       <div className="flex flex-col gap-6">
         <PageHeader
-          eyebrow="Run Detail"
+          eyebrow="运行详情"
           title="数据库不可用"
-          description="请配置 DATABASE_URL 后重试；benchmark 结果会持久化到 Run 表。"
+          description="请配置 DATABASE_URL 后重试；批量测试结果会写入历史记录。"
         />
         <Card>
           <CardContent className="pt-6 text-sm text-muted-foreground">{loadError}</CardContent>
@@ -180,7 +180,7 @@ export default async function RunDetailPage({ params }: RunDetailPageProps) {
         <Button asChild variant="outline">
           <Link href="/benchmark">
             <ArrowLeft className="size-4" aria-hidden="true" />
-            返回 Benchmark
+            返回批量测试
           </Link>
         </Button>
       </div>
@@ -204,22 +204,22 @@ export default async function RunDetailPage({ params }: RunDetailPageProps) {
   return (
     <div className="flex flex-col gap-8">
       <PageHeader
-        eyebrow="Run Detail"
-        title={run.name}
-        description="单次 benchmark / 评估运行的完整输入、工具轨迹、评分与可讲给面试官的产品叙事。"
+        eyebrow="运行详情"
+        title={formatRunName(run.name)}
+        description="查看这次运行的输入、回答、工具过程和评分结果。"
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <Button asChild variant="outline" size="sm">
               <Link href="/dashboard">
                 <ArrowLeft className="size-4" aria-hidden="true" />
-                Dashboard
+                结果总览
               </Link>
             </Button>
             <Button asChild variant="outline" size="sm">
-              <Link href="/benchmark">Benchmark</Link>
+              <Link href="/benchmark">批量测试</Link>
             </Button>
-            <Badge variant={statusVariant} className="rounded-md capitalize">
-              {run.status.toLowerCase().replaceAll("_", " ")}
+            <Badge variant={statusVariant} className="rounded-md">
+              {formatRunStatus(run.status)}
             </Badge>
             <Badge variant="outline" className="rounded-md">
               {vm.modeLabel}
@@ -264,21 +264,21 @@ export default async function RunDetailPage({ params }: RunDetailPageProps) {
               <GitBranch className="size-4 text-primary" aria-hidden="true" />
               模式与模型
             </CardTitle>
-            <CardDescription>Agent 配置与 benchmark 元数据。</CardDescription>
+            <CardDescription>本次运行使用的模式、模型和任务信息。</CardDescription>
           </CardHeader>
           <CardContent className="grid gap-2 text-sm">
-            <InfoRow label="工作流" value={vm.modeLabel} />
-            <InfoRow label="Prisma AgentMode" value={vm.agentMode} />
+            <InfoRow label="运行方式" value={vm.modeLabel} />
+            <InfoRow label="系统记录模式" value={formatStoredMode(vm.agentMode)} />
             <InfoRow label="模型" value={vm.modelsLabel} />
             <InfoRow label="配置名称" value={run.agentConfig.name} />
             {vm.benchmarkMeta.benchmarkId ? (
-              <InfoRow label="Benchmark ID" value={vm.benchmarkMeta.benchmarkId} />
+              <InfoRow label="批量测试批次 ID" value={vm.benchmarkMeta.benchmarkId} />
             ) : null}
             {vm.benchmarkMeta.taskTitle ? (
-              <InfoRow label="任务" value={String(vm.benchmarkMeta.taskTitle)} />
+              <InfoRow label="任务" value={formatTaskTitle(String(vm.benchmarkMeta.taskTitle))} />
             ) : null}
             {vm.benchmarkMeta.category ? (
-              <InfoRow label="类别" value={String(vm.benchmarkMeta.category)} />
+              <InfoRow label="类别" value={formatCategoryLabel(String(vm.benchmarkMeta.category))} />
             ) : null}
             {vm.benchmarkMeta.difficulty != null ? (
               <InfoRow label="难度" value={String(vm.benchmarkMeta.difficulty)} />
@@ -290,9 +290,9 @@ export default async function RunDetailPage({ params }: RunDetailPageProps) {
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
               <Brain className="size-4 text-primary" aria-hidden="true" />
-              评估与 Rubric
+              评分结果
             </CardTitle>
-            <CardDescription>启发式或 LLM judge 产出的分项分（若存在）。</CardDescription>
+            <CardDescription>按规则或模型评分得到的分项结果（若存在）。</CardDescription>
           </CardHeader>
           <CardContent className="grid gap-3">
             <div className="grid grid-cols-3 gap-2">
@@ -302,7 +302,7 @@ export default async function RunDetailPage({ params }: RunDetailPageProps) {
             </div>
             {vm.evaluationMethod ? (
               <Badge variant="secondary" className="w-fit capitalize">
-                {vm.evaluationMethod.replaceAll("_", " ")}
+                {formatEvaluationMethod(vm.evaluationMethod)}
               </Badge>
             ) : null}
             {vm.evaluationExplanation ? (
@@ -323,13 +323,13 @@ export default async function RunDetailPage({ params }: RunDetailPageProps) {
               <MessageSquare className="size-4 text-primary" aria-hidden="true" />
               输入
             </CardTitle>
-            <CardDescription>用户提示、系统提示与原始 JSON。</CardDescription>
+            <CardDescription>用户问题、系统设定和原始请求数据。</CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4">
             {vm.userPrompt ? (
               <div>
                 <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                  User prompt
+                  用户问题
                 </div>
                 <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap rounded-lg border border-border bg-background p-3 text-sm leading-6">
                   {vm.userPrompt}
@@ -339,7 +339,7 @@ export default async function RunDetailPage({ params }: RunDetailPageProps) {
             {vm.systemPrompt ? (
               <div>
                 <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                  System prompt
+                  系统设定
                 </div>
                 <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap rounded-lg border border-border bg-muted/30 p-3 text-xs leading-5 text-muted-foreground">
                   {vm.systemPrompt}
@@ -349,7 +349,7 @@ export default async function RunDetailPage({ params }: RunDetailPageProps) {
             <details className="group rounded-lg border border-border bg-muted/20">
               <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-sm font-medium">
                 <FileJson className="size-4 text-muted-foreground" aria-hidden="true" />
-                原始 input JSON
+                原始输入 JSON
               </summary>
               <pre className="max-h-72 overflow-auto border-t border-border p-3 text-xs leading-relaxed">
                 {safeStringify(vm.rawInput)}
@@ -364,7 +364,7 @@ export default async function RunDetailPage({ params }: RunDetailPageProps) {
               <Layers className="size-4 text-primary" aria-hidden="true" />
               最终输出
             </CardTitle>
-            <CardDescription>面向用户的答案与持久化的 output 载荷。</CardDescription>
+            <CardDescription>本次返回的最终回答，以及系统保存的输出数据。</CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4">
             {vm.finalAnswer ? (
@@ -372,7 +372,7 @@ export default async function RunDetailPage({ params }: RunDetailPageProps) {
                 {vm.finalAnswer}
               </pre>
             ) : (
-              <p className="text-sm text-muted-foreground">无 finalAnswer / outputText 字段。</p>
+              <p className="text-sm text-muted-foreground">当前没有记录到最终回答字段。</p>
             )}
             {vm.errorMessage ? (
               <p className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
@@ -382,7 +382,7 @@ export default async function RunDetailPage({ params }: RunDetailPageProps) {
             <details className="group rounded-lg border border-border bg-muted/20">
               <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-sm font-medium">
                 <FileJson className="size-4 text-muted-foreground" aria-hidden="true" />
-                原始 output JSON
+                原始输出 JSON
               </summary>
               <pre className="max-h-72 overflow-auto border-t border-border p-3 text-xs leading-relaxed">
                 {safeStringify(vm.rawOutput)}
@@ -395,13 +395,13 @@ export default async function RunDetailPage({ params }: RunDetailPageProps) {
       {vm.draftVerifier ? (
         <Card className="border-primary/20 bg-primary/[0.03] shadow-sm">
           <CardHeader>
-            <CardTitle className="text-base">Draft–Verifier 元数据</CardTitle>
-            <CardDescription>推测式工作流中的草稿、验证决策与接受情况。</CardDescription>
+            <CardTitle className="text-base">草稿校验信息</CardTitle>
+            <CardDescription>展示草稿内容、审核决定和接受情况。</CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4 lg:grid-cols-2">
             <div className="grid gap-2 text-sm">
               <InfoRow
-                label="验证决定"
+                label="审核决定"
                 value={vm.draftVerifier.verifierDecision}
               />
               <InfoRow
@@ -427,7 +427,7 @@ export default async function RunDetailPage({ params }: RunDetailPageProps) {
             </div>
             <div>
               <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                Verifier reason
+                审核说明
               </div>
               <p className="mt-2 rounded-lg border border-border bg-background p-3 text-sm leading-6">
                 {vm.draftVerifier.verifierReason}
@@ -436,7 +436,7 @@ export default async function RunDetailPage({ params }: RunDetailPageProps) {
             {vm.draftVerifier.draftAnswer.trim() ? (
               <div className="lg:col-span-2">
                 <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                  Draft 原文
+                  草稿原文
                 </div>
                 <pre className="mt-2 max-h-56 overflow-auto whitespace-pre-wrap rounded-lg border border-border bg-background p-3 text-sm leading-6">
                   {vm.draftVerifier.draftAnswer}
@@ -448,12 +448,12 @@ export default async function RunDetailPage({ params }: RunDetailPageProps) {
       ) : vm.workflowMode === "draft_verifier" ? (
         <Card className="bg-card/85 shadow-sm">
           <CardHeader>
-            <CardTitle className="text-base">Draft–Verifier</CardTitle>
-            <CardDescription>本次运行未包含完整 draft 对象，以下为 summary / metrics 中的线索。</CardDescription>
+            <CardTitle className="text-base">草稿校验摘要</CardTitle>
+            <CardDescription>本次运行没有保存完整草稿对象，以下内容来自 summary 或 metrics。</CardDescription>
           </CardHeader>
           <CardContent className="grid gap-2 text-sm">
             {vm.summaryHints.verifierDecision ? (
-              <InfoRow label="验证决策" value={vm.summaryHints.verifierDecision} />
+              <InfoRow label="审核决定" value={vm.summaryHints.verifierDecision} />
             ) : null}
             {vm.summaryHints.draftAcceptanceRate != null ? (
               <InfoRow
@@ -472,7 +472,7 @@ export default async function RunDetailPage({ params }: RunDetailPageProps) {
             时间线
           </CardTitle>
           <CardDescription>
-            用户输入 → 草稿（若有）→ 工具调用 → 验证（若有）→ 最终回答。
+            用户问题 → 草稿（若有）→ 工具调用 → 审核（若有）→ 最终回答。
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -482,11 +482,11 @@ export default async function RunDetailPage({ params }: RunDetailPageProps) {
 
       <Card className="bg-card/85 shadow-sm">
         <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-base">
-            <Wrench className="size-4 text-primary" aria-hidden="true" />
-            工具调用
-          </CardTitle>
-          <CardDescription>每条包含状态、延迟与序列化负载，便于复盘。</CardDescription>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Wrench className="size-4 text-primary" aria-hidden="true" />
+              工具调用
+            </CardTitle>
+          <CardDescription>每次调用都展示状态、耗时和请求数据，便于快速排查问题。</CardDescription>
         </CardHeader>
         <CardContent className="grid gap-3">
           {vm.toolCalls.length === 0 ? (
@@ -508,26 +508,26 @@ export default async function RunDetailPage({ params }: RunDetailPageProps) {
                       </span>
                     ) : null}
                     <Badge variant={call.status === "SUCCEEDED" ? "secondary" : "destructive"}>
-                      {call.status}
+                      {formatToolCallStatus(call.status)}
                     </Badge>
                   </div>
                 </summary>
                 <div className="grid gap-2 border-t border-border px-3 py-3 text-xs">
                   <div>
-                    <span className="font-medium text-muted-foreground">Input</span>
+                    <span className="font-medium text-muted-foreground">输入</span>
                     <pre className="mt-1 max-h-40 overflow-auto rounded-md bg-muted/50 p-2">
                       {safeStringify(call.input)}
                     </pre>
                   </div>
                   <div>
-                    <span className="font-medium text-muted-foreground">Output</span>
+                    <span className="font-medium text-muted-foreground">输出</span>
                     <pre className="mt-1 max-h-40 overflow-auto rounded-md bg-muted/50 p-2">
                       {safeStringify(call.output)}
                     </pre>
                   </div>
                   {call.error != null ? (
                     <div>
-                      <span className="font-medium text-destructive">Error</span>
+                      <span className="font-medium text-destructive">错误</span>
                       <pre className="mt-1 max-h-32 overflow-auto rounded-md bg-destructive/5 p-2 text-destructive">
                         {safeStringify(call.error)}
                       </pre>
@@ -544,10 +544,10 @@ export default async function RunDetailPage({ params }: RunDetailPageProps) {
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
             <Lightbulb className="size-5 text-primary" aria-hidden="true" />
-            产品解读（Product Interpretation）
+            系统解读
           </CardTitle>
           <CardDescription>
-            基于状态、评分、延迟与工具表现的自动摘要，可用于面试中解释「这次运行说明了什么」。
+            根据状态、评分、耗时和工具表现自动生成，帮助快速判断这次运行值不值得继续优化。
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4">
@@ -561,7 +561,7 @@ export default async function RunDetailPage({ params }: RunDetailPageProps) {
           </ul>
           <Separator />
           <p className="text-xs leading-5 text-muted-foreground">
-            Run ID：<span className="font-mono">{run.id}</span> ·{" "}
+            运行 ID：<span className="font-mono">{run.id}</span> ·{" "}
             {new Date(vm.createdAt).toLocaleString()}
           </p>
         </CardContent>
@@ -675,4 +675,103 @@ function formatDuration(ms: number) {
     return `${(ms / 1000).toFixed(1)} s`;
   }
   return `${ms} ms`;
+}
+
+function formatRunStatus(status: string) {
+  switch (status) {
+    case "SUCCEEDED":
+      return "成功";
+    case "FAILED":
+      return "失败";
+    case "RUNNING":
+      return "运行中";
+    default:
+      return status;
+  }
+}
+
+function formatToolCallStatus(status: string) {
+  switch (status) {
+    case "SUCCEEDED":
+      return "成功";
+    case "FAILED":
+      return "失败";
+    default:
+      return status;
+  }
+}
+
+function formatStoredMode(value: string) {
+  switch (value) {
+    case "BASELINE":
+      return "单代理";
+    case "DRAFT_VERIFIER":
+      return "草稿 + 校验";
+    default:
+      return value;
+  }
+}
+
+function formatEvaluationMethod(value: string) {
+  switch (value) {
+    case "heuristic":
+      return "启发式评分";
+    case "llm_judge":
+      return "模型评分";
+    default:
+      return value.replaceAll("_", " ");
+  }
+}
+
+function formatCategoryLabel(value: string) {
+  const labels: Record<string, string> = {
+    "travel-planning": "行程规划",
+    "customer-support": "客服支持",
+    "product-requirement-clarification": "需求澄清",
+    "data-analysis": "数据分析",
+    "coding-assistant": "代码协作",
+    "meeting-summarization": "会议总结",
+    "product-recommendation": "产品推荐",
+    "budget-planning": "预算规划",
+    "multi-constraint-decision-making": "多约束决策",
+    "agent-self-correction": "智能体自纠偏",
+  };
+
+  return labels[value] ?? value.replaceAll("-", " ");
+}
+
+function formatTaskTitle(value: string) {
+  const labels: Record<string, string> = {
+    "Europe family itinerary under budget": "预算内的欧洲亲子行程规划",
+    "Handle a refund request with policy constraints": "处理带政策边界的退款请求",
+    "Clarify an ambiguous AI product request": "澄清模糊的 AI 功能需求",
+    "Diagnose a drop in sales conversion": "诊断销售漏斗转化下滑",
+    "Debug an asynchronous web app issue": "排查 Web 应用中的异步疑难问题",
+    "Summarize a messy executive meeting": "整理混乱的管理层会议记录",
+    "Recommend a laptop under changing constraints": "在需求变化下推荐合适笔记本",
+    "Plan a quarterly team budget": "规划季度团队预算",
+    "Select a vendor under multiple constraints": "在多重约束下选择供应商",
+    "Recover after misunderstanding the task": "在误解需求后完成自我纠偏",
+  };
+
+  return labels[value] ?? value;
+}
+
+function formatRunName(value: string) {
+  return value
+    .replaceAll("Playground baseline run", "试运行 · 单代理")
+    .replaceAll("Playground draft-verifier run", "试运行 · 草稿 + 校验")
+    .replaceAll("Europe family itinerary under budget", "预算内的欧洲亲子行程规划")
+    .replaceAll("Handle a refund request with policy constraints", "处理带政策边界的退款请求")
+    .replaceAll("Clarify an ambiguous AI product request", "澄清模糊的 AI 功能需求")
+    .replaceAll("Diagnose a drop in sales conversion", "诊断销售漏斗转化下滑")
+    .replaceAll("Debug an asynchronous web app issue", "排查 Web 应用中的异步疑难问题")
+    .replaceAll("Summarize a messy executive meeting", "整理混乱的管理层会议记录")
+    .replaceAll("Recommend a laptop under changing constraints", "在需求变化下推荐合适笔记本")
+    .replaceAll("Plan a quarterly team budget", "规划季度团队预算")
+    .replaceAll("Select a vendor under multiple constraints", "在多重约束下选择供应商")
+    .replaceAll("Recover after misunderstanding the task", "在误解需求后完成自我纠偏")
+    .replaceAll("draft-verifier", "草稿 + 校验")
+    .replaceAll("draft_verifier", "草稿 + 校验")
+    .replaceAll("baseline", "单代理");
 }

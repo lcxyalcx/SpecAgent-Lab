@@ -50,13 +50,13 @@ type AnalyticsDashboardProps = {
   payload: DashboardPayload;
 };
 
-const currency = new Intl.NumberFormat("en-US", {
+const currency = new Intl.NumberFormat("zh-CN", {
   style: "currency",
   currency: "USD",
   maximumFractionDigits: 4,
 });
 
-const dateTime = new Intl.DateTimeFormat("en-US", {
+const dateTime = new Intl.DateTimeFormat("zh-CN", {
   dateStyle: "medium",
   timeStyle: "short",
   timeZone: "UTC",
@@ -68,9 +68,9 @@ export function AnalyticsDashboard({ payload }: AnalyticsDashboardProps) {
   return (
     <div className="flex flex-col gap-8">
       <PageHeader
-        eyebrow="Dashboard"
-        title="Run history, quality, and cost in one view."
-        description="Aggregates recent benchmark-class runs from Postgres. When no compatible runs exist, the charts fall back to deterministic mock data so layouts stay reviewable."
+        eyebrow="结果总览"
+        title="在一个界面里看质量、速度和成本。"
+        description="集中查看最近运行的通过率、耗时、费用和工具稳定性；如果暂时没有历史记录，这里会先展示示例数据帮助你熟悉界面。"
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <Badge
@@ -78,14 +78,14 @@ export function AnalyticsDashboard({ payload }: AnalyticsDashboardProps) {
               className="rounded-md"
             >
               {source === "database"
-                ? "Live data"
+                ? "实时数据"
                 : source === "demo"
-                  ? "Demo (no DATABASE_URL)"
-                  : "Sample data (empty DB)"}
+                  ? "示例数据（未配置数据库）"
+                  : "示例数据（数据库为空）"}
             </Badge>
             <Button asChild variant="outline" size="sm">
               <Link href="/benchmark">
-                Run benchmark
+                去做一次批量测试
                 <ArrowRight className="size-4" aria-hidden="true" />
               </Link>
             </Button>
@@ -96,43 +96,43 @@ export function AnalyticsDashboard({ payload }: AnalyticsDashboardProps) {
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         <StatCard
           icon={Gauge}
-          label="Total runs"
+          label="运行次数"
           value={String(overview.totalRuns)}
-          hint="Recent window"
+          hint="当前统计窗口"
         />
         <StatCard
           icon={Timer}
-          label="Avg latency"
+          label="平均时延"
           value={formatMs(overview.avgLatencyMs)}
-          hint="Across included runs"
+          hint="所含运行的平均值"
         />
         <StatCard
           icon={CircleDollarSign}
-          label="Avg cost"
+          label="平均费用"
           value={currency.format(overview.avgCostUsd)}
-          hint="Estimated per run"
+          hint="按单次运行估算"
         />
         <StatCard
           icon={BarChart3}
-          label="Avg task success"
+          label="平均通过率"
           value={formatPct(overview.avgTaskSuccessScore)}
-          hint="Score 0–100%"
+          hint="评分范围 0–100%"
         />
         <StatCard
           icon={Wrench}
-          label="Tool error rate"
+          label="工具报错率"
           value={formatPct(overview.toolErrorRate)}
-          hint="Mean of per-run rates"
+          hint="按每次运行求均值"
         />
         <StatCard
           icon={Gauge}
-          label="Draft acceptance"
+          label="草稿接受率"
           value={
             overview.draftAcceptanceRate === null
-              ? "N/A"
+              ? "不适用"
               : formatPct(overview.draftAcceptanceRate)
           }
-          hint="Draft-verifier runs only"
+          hint="仅统计草稿校验模式"
         />
       </section>
 
@@ -140,9 +140,9 @@ export function AnalyticsDashboard({ payload }: AnalyticsDashboardProps) {
         <CardHeader className="pb-2">
           <CardTitle className="flex items-center gap-2 text-lg">
             <Lightbulb className="size-5 text-primary" aria-hidden="true" />
-            Product insight
+            系统解读
           </CardTitle>
-          <CardDescription>Auto-generated from the current aggregates (not an LLM).</CardDescription>
+          <CardDescription>根据当前汇总结果自动生成，帮助快速判断接下来该优化什么。</CardDescription>
         </CardHeader>
         <CardContent>
           <p className="text-base leading-7 text-foreground">{payload.productInsight}</p>
@@ -150,7 +150,7 @@ export function AnalyticsDashboard({ payload }: AnalyticsDashboardProps) {
       </Card>
 
       <section className="grid gap-5 lg:grid-cols-2">
-        <ChartCard title="Latency by mode" description="Mean latency — lower is better">
+        <ChartCard title="不同模式的平均时延" description="耗时越低越好">
           <ChartViewport>
             {({ width, height }) => (
               <BarChart
@@ -176,7 +176,7 @@ export function AnalyticsDashboard({ payload }: AnalyticsDashboardProps) {
           </ChartViewport>
         </ChartCard>
 
-        <ChartCard title="Cost by mode" description="Mean estimated USD per run">
+        <ChartCard title="不同模式的平均费用" description="按单次运行估算的美元成本">
           <ChartViewport>
             {({ width, height }) => (
               <BarChart
@@ -202,7 +202,7 @@ export function AnalyticsDashboard({ payload }: AnalyticsDashboardProps) {
           </ChartViewport>
         </ChartCard>
 
-        <ChartCard title="Task success score by mode" description="Mean rubric-style success (0–100%)">
+        <ChartCard title="不同模式的平均通过率" description="按评分规则换算后的平均分（0–100%）">
           <ChartViewport>
             {({ width, height }) => (
               <BarChart
@@ -226,11 +226,11 @@ export function AnalyticsDashboard({ payload }: AnalyticsDashboardProps) {
         </ChartCard>
 
         <ChartCard
-          title="Draft acceptance trend"
-          description="Draft-verifier runs with acceptance rate (chronological)"
+          title="草稿接受率趋势"
+          description="按时间顺序查看草稿校验模式的接受率变化"
         >
           {payload.chartDraftAcceptanceTrend.length === 0 ? (
-            <EmptyChart message="No draft-verifier runs with acceptance metrics yet." />
+            <EmptyChart message="暂时还没有带草稿接受率指标的运行记录。" />
           ) : (
             <ChartViewport>
               {({ width, height }) => (
@@ -259,12 +259,12 @@ export function AnalyticsDashboard({ payload }: AnalyticsDashboardProps) {
       </section>
 
       <ChartCard
-        title="Tool error rate by category"
-        description="Mean tool error rate (%) — baseline vs draft-verifier"
+        title="按任务类型查看工具报错率"
+        description="比较不同模式在各类任务中的平均工具报错率（%）"
         contentClassName="h-80"
       >
         {payload.chartToolErrorByCategory.length === 0 ? (
-          <EmptyChart message="No category breakdown available." />
+          <EmptyChart message="暂时还没有可用的分类对比数据。" />
         ) : (
           <ChartViewport>
             {({ width, height }) => (
@@ -279,10 +279,10 @@ export function AnalyticsDashboard({ payload }: AnalyticsDashboardProps) {
                 <YAxis tick={{ fill: "var(--muted-foreground)", fontSize: 12 }} tickFormatter={(v) => `${v}%`} />
                 <Tooltip contentStyle={tooltipStyle} formatter={(v) => `${Math.round(Number(v))}%`} />
                 <Legend />
-                <Bar dataKey="baseline" name="Baseline" fill="var(--chart-4)" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="baseline" name="单代理" fill="var(--chart-4)" radius={[4, 4, 0, 0]} />
                 <Bar
                   dataKey="draftVerifier"
-                  name="Draft + Verifier"
+                  name="草稿 + 校验"
                   fill="var(--chart-2)"
                   radius={[4, 4, 0, 0]}
                 />
@@ -294,18 +294,18 @@ export function AnalyticsDashboard({ payload }: AnalyticsDashboardProps) {
 
       <Card className="bg-card/85 shadow-sm">
         <CardHeader>
-          <CardTitle>Mode comparison</CardTitle>
-          <CardDescription>Baseline versus draft-verifier averages over the same run window.</CardDescription>
+          <CardTitle>模式对比</CardTitle>
+          <CardDescription>在同一批运行窗口里，对比不同模式的平均表现。</CardDescription>
         </CardHeader>
         <CardContent className="overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Mode</TableHead>
-                <TableHead className="text-right">Runs</TableHead>
-                <TableHead className="text-right">Avg latency</TableHead>
-                <TableHead className="text-right">Avg cost</TableHead>
-                <TableHead className="text-right">Avg success</TableHead>
+                <TableHead>模式</TableHead>
+                <TableHead className="text-right">运行数</TableHead>
+                <TableHead className="text-right">平均时延</TableHead>
+                <TableHead className="text-right">平均费用</TableHead>
+                <TableHead className="text-right">平均通过率</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -329,35 +329,35 @@ export function AnalyticsDashboard({ payload }: AnalyticsDashboardProps) {
 
       <Card className="bg-card/85 shadow-sm">
         <CardHeader>
-          <CardTitle>Recent runs</CardTitle>
-          <CardDescription>Open a persisted run for full output and tool trace.</CardDescription>
+          <CardTitle>最近运行</CardTitle>
+          <CardDescription>打开任意一条已保存记录，查看完整回答和工具过程。</CardDescription>
         </CardHeader>
         <CardContent className="overflow-x-auto">
           {payload.recentRuns.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No runs in this window.</p>
+            <p className="text-sm text-muted-foreground">当前统计窗口里还没有运行记录。</p>
           ) : (
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Run</TableHead>
-                  <TableHead>Mode</TableHead>
-                  <TableHead className="text-right">Success</TableHead>
-                  <TableHead className="text-right">Latency</TableHead>
-                  <TableHead className="text-right">Open</TableHead>
+                  <TableHead>运行</TableHead>
+                  <TableHead>模式</TableHead>
+                  <TableHead className="text-right">通过率</TableHead>
+                  <TableHead className="text-right">时延</TableHead>
+                  <TableHead className="text-right">查看</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {payload.recentRuns.map((row) => (
                   <TableRow key={row.id}>
                     <TableCell className="max-w-[220px]">
-                      <div className="truncate font-medium">{row.name}</div>
+                      <div className="truncate font-medium">{formatRunName(row.name)}</div>
                       <div className="text-xs text-muted-foreground">
                         {formatTimestamp(row.createdAt)}
                       </div>
                     </TableCell>
                     <TableCell>
                       <Badge variant="outline" className="capitalize">
-                        {row.mode === "baseline" ? "Baseline" : "Draft + Verifier"}
+                        {row.mode === "baseline" ? "单代理" : "草稿 + 校验"}
                       </Badge>
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
@@ -366,7 +366,7 @@ export function AnalyticsDashboard({ payload }: AnalyticsDashboardProps) {
                     <TableCell className="text-right tabular-nums">{formatMs(row.latencyMs)}</TableCell>
                     <TableCell className="text-right">
                       <Button asChild size="sm" variant="ghost">
-                        <Link href={`/runs/${encodeURIComponent(row.id)}`}>View</Link>
+                        <Link href={`/runs/${encodeURIComponent(row.id)}`}>查看详情</Link>
                       </Button>
                     </TableCell>
                   </TableRow>
@@ -382,6 +382,35 @@ export function AnalyticsDashboard({ payload }: AnalyticsDashboardProps) {
 
 function formatTimestamp(value: string) {
   return `${dateTime.format(new Date(value))} UTC`;
+}
+
+function formatRunName(value: string) {
+  return value
+    .replaceAll("Playground baseline run", "试运行 · 单代理")
+    .replaceAll("Playground draft-verifier run", "试运行 · 草稿 + 校验")
+    .replaceAll("travel-europe-family-itinerary", "预算内的欧洲亲子行程规划")
+    .replaceAll("support-refund-escalation", "处理带政策边界的退款请求")
+    .replaceAll("prd-clarification-for-ai-feature", "澄清模糊的 AI 功能需求")
+    .replaceAll("sales-dataset-diagnosis", "诊断销售漏斗转化下滑")
+    .replaceAll("codebase-bug-fix-guidance", "排查 Web 应用中的异步疑难问题")
+    .replaceAll("executive-meeting-synthesis", "整理混乱的管理层会议记录")
+    .replaceAll("laptop-recommendation-tradeoffs", "在需求变化下推荐合适笔记本")
+    .replaceAll("quarterly-team-budget-plan", "规划季度团队预算")
+    .replaceAll("vendor-selection-under-constraints", "在多重约束下选择供应商")
+    .replaceAll("agent-self-correction-after-misread", "在误解需求后完成自我纠偏")
+    .replaceAll("Europe family itinerary under budget", "预算内的欧洲亲子行程规划")
+    .replaceAll("Handle a refund request with policy constraints", "处理带政策边界的退款请求")
+    .replaceAll("Clarify an ambiguous AI product request", "澄清模糊的 AI 功能需求")
+    .replaceAll("Diagnose a drop in sales conversion", "诊断销售漏斗转化下滑")
+    .replaceAll("Debug an asynchronous web app issue", "排查 Web 应用中的异步疑难问题")
+    .replaceAll("Summarize a messy executive meeting", "整理混乱的管理层会议记录")
+    .replaceAll("Recommend a laptop under changing constraints", "在需求变化下推荐合适笔记本")
+    .replaceAll("Plan a quarterly team budget", "规划季度团队预算")
+    .replaceAll("Select a vendor under multiple constraints", "在多重约束下选择供应商")
+    .replaceAll("Recover after misunderstanding the task", "在误解需求后完成自我纠偏")
+    .replaceAll("draft-verifier", "草稿 + 校验")
+    .replaceAll("baseline", "单代理")
+    .replaceAll("draft_verifier", "草稿 + 校验");
 }
 
 function StatCard({

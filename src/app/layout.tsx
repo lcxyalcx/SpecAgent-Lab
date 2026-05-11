@@ -18,9 +18,9 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   metadataBase: new URL(getPublicAppUrl()),
-  title: "SpecAgent Lab | 智能体评测工作台",
+  title: "SpecAgent Lab | 智能体运行与结果中心",
   description:
-    "用于配置智能体、运行基准测试并查看评测结果的 SpecAgent Lab 工作台。",
+    "用于配置智能体、试运行任务、批量比较结果并回看运行记录的 SpecAgent Lab。",
 };
 
 export default function RootLayout({

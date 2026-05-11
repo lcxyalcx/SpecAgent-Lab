@@ -143,12 +143,12 @@ export function buildDashboardPayload(
 
   const chartLatencyByMode = [
     {
-      name: "Baseline",
+      name: "单代理",
       latencyMs: comparison.baseline.runCount ? comparison.baseline.avgLatencyMs : 0,
       fill: "var(--chart-4)",
     },
     {
-      name: "Draft + Verifier",
+      name: "草稿 + 校验",
       latencyMs: comparison.draftVerifier.runCount ? comparison.draftVerifier.avgLatencyMs : 0,
       fill: "var(--chart-2)",
     },
@@ -156,12 +156,12 @@ export function buildDashboardPayload(
 
   const chartCostByMode = [
     {
-      name: "Baseline",
+      name: "单代理",
       costUsd: comparison.baseline.runCount ? comparison.baseline.avgCostUsd : 0,
       fill: "var(--chart-4)",
     },
     {
-      name: "Draft + Verifier",
+      name: "草稿 + 校验",
       costUsd: comparison.draftVerifier.runCount ? comparison.draftVerifier.avgCostUsd : 0,
       fill: "var(--chart-2)",
     },
@@ -169,12 +169,12 @@ export function buildDashboardPayload(
 
   const chartSuccessByMode = [
     {
-      name: "Baseline",
+      name: "单代理",
       successPct: comparison.baseline.runCount ? comparison.baseline.avgTaskSuccessScore * 100 : 0,
       fill: "var(--chart-4)",
     },
     {
-      name: "Draft + Verifier",
+      name: "草稿 + 校验",
       successPct: comparison.draftVerifier.runCount
         ? comparison.draftVerifier.avgTaskSuccessScore * 100
         : 0,
@@ -279,10 +279,10 @@ function computeComparison(runs: NormalizedRun[]) {
 
   const baseline: ModeComparisonRow =
     baselineRuns.length === 0
-      ? emptyModeRow("baseline", "Baseline")
+      ? emptyModeRow("baseline", "单代理")
       : {
           mode: "baseline",
-          label: "Baseline",
+          label: "单代理",
           runCount: baselineRuns.length,
           avgLatencyMs: Math.round(average(baselineRuns.map((run) => run.latencyMs))),
           avgCostUsd: average(baselineRuns.map((run) => run.costUsd)),
@@ -291,10 +291,10 @@ function computeComparison(runs: NormalizedRun[]) {
 
   const draftVerifier: ModeComparisonRow =
     draftRuns.length === 0
-      ? emptyModeRow("draft_verifier", "Draft + Verifier")
+      ? emptyModeRow("draft_verifier", "草稿 + 校验")
       : {
           mode: "draft_verifier",
-          label: "Draft + Verifier",
+          label: "草稿 + 校验",
           runCount: draftRuns.length,
           avgLatencyMs: Math.round(average(draftRuns.map((run) => run.latencyMs))),
           avgCostUsd: average(draftRuns.map((run) => run.costUsd)),
@@ -357,7 +357,7 @@ function buildProductInsight(
   const draft = comparison.draftVerifier;
 
   if (!baseline.runCount || !draft.runCount) {
-    return "当 baseline 与 draft-verifier 都有足够运行次数时，这里会自动对比延迟、成本与成功率，并突出高难度任务上的差异。";
+    return "当单代理和草稿加校验都有足够运行次数时，这里会自动对比耗时、费用与成功率，并提示高难度任务上的差异。";
   }
 
   const latDeltaPct =
@@ -374,20 +374,20 @@ function buildProductInsight(
 
   let latencyPhrase: string;
   if (latDeltaPct > 3) {
-    latencyPhrase = `Draft-verifier 将平均延迟降低了约 ${Math.round(latDeltaPct)}%（相对 baseline）。`;
+    latencyPhrase = `草稿加校验模式把平均耗时降低了约 ${Math.round(latDeltaPct)}%。`;
   } else if (latDeltaPct < -3) {
-    latencyPhrase = `Baseline 平均比 draft-verifier 快约 ${Math.round(-latDeltaPct)}%。`;
+    latencyPhrase = `单代理模式平均比草稿加校验快约 ${Math.round(-latDeltaPct)}%。`;
   } else {
     latencyPhrase = "两种模式的平均延迟接近。";
   }
 
   let successPhrase: string;
   if (succDeltaPct > 3) {
-    successPhrase = `同期整体任务成功分高约 ${Math.round(succDeltaPct)}%（相对 baseline）。`;
+    successPhrase = `同时，它的整体任务成功分也高约 ${Math.round(succDeltaPct)}%。`;
   } else if (succDeltaPct < -3) {
-    successPhrase = `但整体成功分低约 ${Math.round(-succDeltaPct)}%，需要权衡质量与速度。`;
+    successPhrase = `但它的整体任务成功分低约 ${Math.round(-succDeltaPct)}%，需要一起权衡质量与速度。`;
   } else {
-    successPhrase = "整体任务成功分与 baseline 相近。";
+    successPhrase = "两种模式的整体任务成功分接近。";
   }
 
   let hardPhrase = "";
@@ -400,7 +400,7 @@ function buildProductInsight(
         : 0;
 
     if (Math.abs(h) >= 4) {
-      hardPhrase = ` 在高难度任务（难度 ≥ ${HARD_DIFFICULTY}）上，draft-verifier 的平均成功分比 baseline ${h >= 0 ? "高约" : "低约"} ${Math.round(Math.abs(h))}%。`;
+      hardPhrase = ` 在高难度任务（难度 ≥ ${HARD_DIFFICULTY}）上，草稿加校验的平均成功分比单代理${h >= 0 ? "高约" : "低约"} ${Math.round(Math.abs(h))}%。`;
     }
   }
 
@@ -424,7 +424,7 @@ export function buildMockDashboardPayload(): DashboardPayload {
         baseline.toolCalls > 0 ? baseline.toolErrors / baseline.toolCalls : 0;
       normalized.push({
         id: `mock-baseline-${task.id}`,
-        name: `${task.title} · baseline`,
+        name: `${task.title} · 单代理`,
         createdAt,
         mode: "baseline",
         category: task.domain.replaceAll("-", " "),
@@ -441,7 +441,7 @@ export function buildMockDashboardPayload(): DashboardPayload {
       const toolErrorRate = draft.toolCalls > 0 ? draft.toolErrors / draft.toolCalls : 0;
       normalized.push({
         id: `mock-draft-${task.id}`,
-        name: `${task.title} · draft+verifier`,
+        name: `${task.title} · 草稿 + 校验`,
         createdAt: new Date(new Date(createdAt).getTime() + 3_600_000).toISOString(),
         mode: "draft_verifier",
         category: task.domain.replaceAll("-", " "),

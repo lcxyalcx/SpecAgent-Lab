@@ -39,7 +39,7 @@ export async function POST(request: Request) {
   if (!parsedRequest.success) {
     return NextResponse.json(
       {
-        error: "Benchmark 请求参数不完整或格式不正确。",
+        error: "批量测试请求参数不完整或格式不正确。",
         details: parsedRequest.error.flatten(),
       },
       { status: 400 },
@@ -54,7 +54,7 @@ export async function POST(request: Request) {
   if (invalidTaskIds.length > 0) {
     return NextResponse.json(
       {
-        error: "存在无法识别的 Benchmark 任务 ID。",
+        error: "存在无法识别的任务 ID。",
         invalidTaskIds,
       },
       { status: 400 },
@@ -94,7 +94,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json(
       {
-        error: "无法启动当前 Benchmark 运行。",
+        error: "无法启动当前批量测试。",
       },
       { status: 500 },
     );

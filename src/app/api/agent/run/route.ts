@@ -178,8 +178,8 @@ export async function POST(request: Request) {
           data: {
             name:
               input.mode === "baseline"
-                ? "Playground baseline run"
-                : "Playground draft-verifier run",
+                ? "试运行 · 单代理"
+                : "试运行 · 草稿 + 校验",
             agentConfigId: agentConfig.id,
             status:
               runResult.status === "succeeded"
@@ -263,7 +263,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json(
       {
-        error: "无法执行当前 Playground 请求。",
+        error: "无法执行当前试运行请求。",
       },
       { status: 500 },
     );

@@ -94,7 +94,7 @@ export async function runBenchmark(
 ): Promise<BenchmarkRunnerResult> {
   const useLlmJudge = input.useLlmJudge === true;
   const defaultModels = getDefaultAgentModels(input.providerConfig);
-  const benchmarkId = `bench_${Date.now()}`;
+const benchmarkId = `bench_${Date.now()}`;
   const tasks = benchmarkTaskLibrary.filter((task) => input.taskIds.includes(task.id));
   let persistenceContext: {
     prisma: ReturnType<typeof getPrisma>;
@@ -172,7 +172,7 @@ export async function runBenchmark(
         try {
           const persistedRun = await persistenceContext.prisma.run.create({
             data: {
-              name: `${benchmarkId} · ${mode} · ${task.title}`,
+              name: `${benchmarkId} · ${getModeLabel(mode)} · ${getTaskDisplayTitle(task.id, task.title)}`,
               agentConfigId: persistenceContext.modeConfigs.get(mode)!.id,
               benchmarkTaskId: persistedTask.id,
               status:
@@ -294,8 +294,8 @@ async function createModeConfigs(
       data: {
         name:
           mode === "baseline"
-            ? `Benchmark baseline ${Date.now()}`
-            : `Benchmark draft-verifier ${Date.now()}`,
+            ? `批量测试单代理 ${Date.now()}`
+            : `批量测试草稿校验 ${Date.now()}`,
         mode: mode === "baseline" ? AgentMode.BASELINE : AgentMode.DRAFT_VERIFIER,
         model:
           mode === "baseline"
@@ -303,8 +303,8 @@ async function createModeConfigs(
             : `${defaultModels.draft} -> ${defaultModels.verifier}`,
         systemPrompt:
           mode === "baseline"
-            ? "Benchmark baseline configuration for multi-turn agent evaluation."
-            : "Benchmark speculative-style draft-verifier configuration for multi-turn agent evaluation.",
+            ? "用于批量测试的单代理默认配置。"
+            : "用于批量测试的草稿加校验默认配置。",
         enabledTools: toJsonValue(["calculator", "mockSearch", "productDb", "calendar"]),
         toolConfig: toJsonValue({
           source: "benchmark-runner",
@@ -318,6 +318,27 @@ async function createModeConfigs(
   }
 
   return configs;
+}
+
+function getModeLabel(mode: BenchmarkMode) {
+  return mode === "baseline" ? "单代理" : "草稿 + 校验";
+}
+
+function getTaskDisplayTitle(taskId: string, fallback: string) {
+  const labels: Record<string, string> = {
+    "travel-europe-family-itinerary": "预算内的欧洲亲子行程规划",
+    "support-refund-escalation": "处理带政策边界的退款请求",
+    "prd-clarification-for-ai-feature": "澄清模糊的 AI 功能需求",
+    "sales-dataset-diagnosis": "诊断销售漏斗转化下滑",
+    "codebase-bug-fix-guidance": "排查 Web 应用中的异步疑难问题",
+    "executive-meeting-synthesis": "整理混乱的管理层会议记录",
+    "laptop-recommendation-tradeoffs": "在需求变化下推荐合适笔记本",
+    "quarterly-team-budget-plan": "规划季度团队预算",
+    "vendor-selection-under-constraints": "在多重约束下选择供应商",
+    "agent-self-correction-after-misread": "在误解需求后完成自我纠偏",
+  };
+
+  return labels[taskId] ?? fallback;
 }
 
 async function ensureBenchmarkTaskRecord(
@@ -335,7 +356,7 @@ async function ensureBenchmarkTaskRecord(
   return prisma.benchmarkTask.create({
     data: {
       slug: task.id,
-      title: task.title,
+      title: getTaskDisplayTitle(task.id, task.title),
       description: task.expectedOutcome,
       category: task.category,
       difficulty: difficultyWeight(task.difficulty),

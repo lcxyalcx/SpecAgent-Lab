@@ -9,10 +9,10 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 const navItems = [
-  { href: "/", label: "总览" },
-  { href: "/playground", label: "调试台" },
-  { href: "/benchmark", label: "基准测试" },
-  { href: "/dashboard", label: "仪表盘" },
+  { href: "/", label: "首页" },
+  { href: "/playground", label: "试运行" },
+  { href: "/benchmark", label: "批量测试" },
+  { href: "/dashboard", label: "结果总览" },
 ];
 
 export function TopNav() {
@@ -30,9 +30,9 @@ export function TopNav() {
               SpecAgent Lab
             </Link>
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <span>智能体评测工作台</span>
+              <span>智能体运行与结果中心</span>
               <Badge variant="outline" className="rounded-md px-1.5 py-0 text-[10px]">
-                MVP
+                可直接使用
               </Badge>
             </div>
           </div>
@@ -61,13 +61,13 @@ export function TopNav() {
           <Button asChild variant="outline" size="sm" className="hidden sm:inline-flex">
             <Link href="/runs/demo-run">
               <Beaker className="size-4" aria-hidden="true" />
-              最近运行
+              最近一次运行
             </Link>
           </Button>
           <Button asChild size="sm">
             <Link href="/dashboard">
               <BarChart3 className="size-4" aria-hidden="true" />
-              打开仪表盘
+              查看结果总览
             </Link>
           </Button>
         </div>

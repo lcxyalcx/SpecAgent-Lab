@@ -70,13 +70,13 @@ const toolOptions = [
 const modeOptions = [
   {
     value: "baseline",
-    label: "单代理",
-    description: "单个智能体直接执行，并按需调用工具。",
+    label: "直接运行",
+    description: "由一个智能体直接完成回答，并按需调用工具。",
   },
   {
     value: "draft_verifier",
     label: "草稿 + 校验",
-    description: "先生成草稿，再由校验模型审核或改写。",
+    description: "先生成草稿，再由校验模型审核、接受或改写。",
   },
 ] as const;
 
@@ -163,7 +163,7 @@ type FormState = {
 };
 
 function getAutoAgentName(mode: Mode) {
-  return mode === "baseline" ? "SpecAgent 单代理演示" : "SpecAgent 草稿校验演示";
+  return mode === "baseline" ? "SpecAgent 试运行" : "SpecAgent 草稿校验";
 }
 
 function buildDefaultFormState(provider: AiProvider): FormState {
@@ -173,9 +173,9 @@ function buildDefaultFormState(provider: AiProvider): FormState {
     agentName: getAutoAgentName("baseline"),
     mode: "baseline",
     systemPrompt:
-      "你是一个用于评测的产品智能体。请谨慎使用确定性工具，清楚解释取舍，并优先保证结果稳定可靠。",
+      "你是一个可靠的产品助手。请在需要时使用工具，清楚说明取舍，并优先给出稳定、可执行的回答。",
     userPrompt:
-      "请推荐一台适合频繁出差、轻度编程、续航优先的笔记本电脑，总预算控制在 1400 美元以内，并说明取舍。",
+      "我经常出差，也会做一点轻度编程，想买一台续航优先的笔记本电脑，预算控制在 1400 美元以内。请给我推荐并说明取舍。",
     model: defaults.baseline,
     draftModel: defaults.draft,
     verifierModel: defaults.verifier,
@@ -288,13 +288,13 @@ export function AgentPlayground({ defaultProvider }: AgentPlaygroundProps) {
           payload.result?.error && payload.result.error !== payload.error
             ? ` ${payload.result.error}`
             : "";
-        setErrorMessage(`${payload.error ?? "无法运行当前智能体。"}${detail}${suffix}`);
+        setErrorMessage(`${payload.error ?? "无法开始这次试运行。"}${detail}${suffix}`);
         return;
       }
 
       setRunResult(payload);
     } catch {
-      setErrorMessage("调用 Playground API 时发生网络错误。");
+      setErrorMessage("启动试运行时发生网络错误。");
     } finally {
       setIsSubmitting(false);
     }
@@ -303,16 +303,16 @@ export function AgentPlayground({ defaultProvider }: AgentPlaygroundProps) {
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
-        eyebrow="调试台"
-        title="配置、运行并检查一次智能体执行。"
-        description="可以在这里运行单代理模式或草稿校验模式，并在同一处查看时延、成本、工具调用轨迹和校验结论。"
+        eyebrow="试运行"
+        title="先试跑一个问题，再决定怎么调。"
+        description="输入系统设定、用户问题、模型和工具，立即查看回答内容、耗时和调用轨迹。"
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant="outline" className="rounded-md border-primary/25 bg-primary/5 px-2.5 py-1 text-primary">
-              确定性工具链
+              内置工具
             </Badge>
             <Badge variant="outline" className="rounded-md px-2.5 py-1">
-              支持部署演示
+              可直接试跑
             </Badge>
           </div>
         }
@@ -323,14 +323,14 @@ export function AgentPlayground({ defaultProvider }: AgentPlaygroundProps) {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Bot className="size-4 text-primary" aria-hidden="true" />
-              智能体配置
+              运行设置
             </CardTitle>
-            <CardDescription>设置运行模式、提示词以及本次可用的工具范围。</CardDescription>
+            <CardDescription>设置这次试运行的提示词、模型和工具范围。</CardDescription>
           </CardHeader>
           <CardContent>
             <form className="grid gap-5" onSubmit={handleSubmit}>
               <div className="grid gap-2">
-                <Label htmlFor="agent-name">智能体名称</Label>
+                <Label htmlFor="agent-name">方案名称</Label>
                 <Input
                   id="agent-name"
                   value={formState.agentName}
@@ -340,12 +340,12 @@ export function AgentPlayground({ defaultProvider }: AgentPlaygroundProps) {
                       agentName: event.target.value,
                     }))
                   }
-                  placeholder="例如：SpecAgent 推荐助手"
+                  placeholder="例如：差旅助手试运行"
                 />
               </div>
 
               <div className="grid gap-2">
-                <Label htmlFor="agent-mode">运行模式</Label>
+                <Label htmlFor="agent-mode">运行方式</Label>
                 <Select
                   value={formState.mode}
                   onValueChange={(value: Mode) =>
@@ -373,7 +373,7 @@ export function AgentPlayground({ defaultProvider }: AgentPlaygroundProps) {
               </div>
 
               <div className="grid gap-2">
-                <Label htmlFor="system-prompt">系统提示词</Label>
+                <Label htmlFor="system-prompt">系统设定</Label>
                 <Textarea
                   id="system-prompt"
                   className="min-h-40"
@@ -388,7 +388,7 @@ export function AgentPlayground({ defaultProvider }: AgentPlaygroundProps) {
               </div>
 
               <div className="grid gap-2">
-                <Label htmlFor="user-prompt">用户提示词</Label>
+                <Label htmlFor="user-prompt">用户问题</Label>
                 <Textarea
                   id="user-prompt"
                   className="min-h-32"
@@ -475,7 +475,7 @@ export function AgentPlayground({ defaultProvider }: AgentPlaygroundProps) {
 
               <div className="grid gap-3">
                 <div className="flex items-center justify-between gap-3">
-                  <Label>启用工具</Label>
+                  <Label>可用工具</Label>
                   <Badge variant="secondary" className="rounded-md px-2.5 py-1">
                     已选 {selectedToolCount} 个
                   </Badge>
@@ -524,11 +524,11 @@ export function AgentPlayground({ defaultProvider }: AgentPlaygroundProps) {
               <div className="grid gap-3 rounded-lg border border-border bg-muted/30 p-4">
                 <div className="flex items-center justify-between gap-3">
                   <div>
-                    <div className="text-sm font-medium text-foreground">运行画像</div>
+                    <div className="text-sm font-medium text-foreground">本次运行</div>
                     <p className="text-sm text-muted-foreground">
                       {formState.mode === "baseline"
-                        ? `使用 ${getProviderLabel(activeProvider)} 兼容模型完成单次执行，并保留确定性工具轨迹。`
-                        : `使用 ${getProviderLabel(activeProvider)} 兼容模型生成草稿，再由校验模型审核或重写。`}
+                        ? `使用 ${getProviderLabel(activeProvider)} 模型直接完成回答，并保留完整调用轨迹。`
+                        : `先用 ${getProviderLabel(activeProvider)} 模型生成草稿，再交给校验模型复核或改写。`}
                     </p>
                   </div>
                   <div className="flex size-10 items-center justify-center rounded-lg border border-primary/20 bg-primary/8 text-primary">
@@ -548,7 +548,7 @@ export function AgentPlayground({ defaultProvider }: AgentPlaygroundProps) {
                   ) : (
                     <>
                       <Zap className="size-4" aria-hidden="true" />
-                      运行智能体
+                      开始运行
                     </>
                   )}
                 </Button>
@@ -558,54 +558,54 @@ export function AgentPlayground({ defaultProvider }: AgentPlaygroundProps) {
         </Card>
 
         <div className="flex min-w-0 flex-col gap-5">
-      {errorMessage ? (
-        <Alert variant="destructive">
-          <TriangleAlert className="size-4" aria-hidden="true" />
-          <AlertTitle>运行失败</AlertTitle>
-          <AlertDescription>{errorMessage}</AlertDescription>
-        </Alert>
-      ) : null}
+          {errorMessage ? (
+            <Alert variant="destructive">
+              <TriangleAlert className="size-4" aria-hidden="true" />
+              <AlertTitle>运行失败</AlertTitle>
+              <AlertDescription>{errorMessage}</AlertDescription>
+            </Alert>
+          ) : null}
 
-      {isReady ? (
-        <Alert>
-          <Sparkles className="size-4" aria-hidden="true" />
-          <AlertTitle>
-            {isConfigured ? "已检测到浏览器侧 API 配置" : "未检测到浏览器侧 API 配置"}
-          </AlertTitle>
-          <AlertDescription>
-            {isConfigured
-              ? `本次会优先使用首页中保存的 ${getProviderLabel(providerConfig?.provider ?? defaultProvider)} 本地凭证。`
-              : `当前会回退使用部署环境中的 ${getProviderLabel(defaultProvider)} 配置。若未在服务端配置密钥，请先回首页填写本地 API 配置。`}
-          </AlertDescription>
-        </Alert>
-      ) : null}
+          {isReady ? (
+            <Alert>
+              <Sparkles className="size-4" aria-hidden="true" />
+              <AlertTitle>
+                {isConfigured ? "已检测到浏览器侧 API 配置" : "未检测到浏览器侧 API 配置"}
+              </AlertTitle>
+              <AlertDescription>
+                {isConfigured
+                  ? `本次会优先使用首页中保存的 ${getProviderLabel(providerConfig?.provider ?? defaultProvider)} 本地凭证。`
+                  : `当前会回退使用部署环境中的 ${getProviderLabel(defaultProvider)} 配置。若未在服务端配置密钥，请先回首页填写本地 API 配置。`}
+              </AlertDescription>
+            </Alert>
+          ) : null}
 
-      {runResult && !runResult.persisted ? (
-        <Alert>
-          <TriangleAlert className="size-4" aria-hidden="true" />
-          <AlertTitle>未持久化运行</AlertTitle>
-          <AlertDescription>
-            当前数据库尚未配置，这次运行仅会显示在调试台里，不会保存到 <span className="font-mono">/runs/[id]</span>。
-          </AlertDescription>
-        </Alert>
-      ) : null}
+          {runResult && !runResult.persisted ? (
+            <Alert>
+              <TriangleAlert className="size-4" aria-hidden="true" />
+              <AlertTitle>未持久化运行</AlertTitle>
+              <AlertDescription>
+                当前数据库尚未配置，这次试运行结果会先显示在当前页面，不会保存到 <span className="font-mono">/runs/[id]</span>。
+              </AlertDescription>
+            </Alert>
+          ) : null}
 
           <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             <MetricCard
               icon={Clock3}
-              label="时延"
+              label="总耗时"
               value={runResult ? formatMs(runResult.latency) : "—"}
               hint="端到端耗时"
             />
             <MetricCard
               icon={CircleDollarSign}
-              label="预估成本"
+              label="预估费用"
               value={runResult ? compactCurrency.format(runResult.cost) : "—"}
               hint="按 Token 粗略估算"
             />
             <MetricCard
               icon={Wrench}
-              label="工具调用"
+              label="工具次数"
               value={runResult ? String(runResult.toolCalls.length) : "—"}
               hint="本次轨迹中的调用次数"
             />
@@ -627,10 +627,10 @@ export function AgentPlayground({ defaultProvider }: AgentPlaygroundProps) {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Brain className="size-4 text-primary" aria-hidden="true" />
-                运行结果
+                本次结果
               </CardTitle>
               <CardDescription>
-                查看最近一次 Playground 运行的最终回答、轨迹细节与流程级指标。
+                查看最近一次试运行的回答、轨迹细节与关键指标。
               </CardDescription>
             </CardHeader>
             <CardContent className="grid gap-5">
@@ -642,9 +642,9 @@ export function AgentPlayground({ defaultProvider }: AgentPlaygroundProps) {
                     <Bot className="size-5" aria-hidden="true" />
                   </div>
                   <div className="space-y-2">
-                    <h2 className="text-lg font-medium">准备开始第一次运行</h2>
+                    <h2 className="text-lg font-medium">可以开始第一次试运行了</h2>
                     <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
-                      先设置提示词和模型，再运行一次，就能检查回答质量、工具使用情况以及草稿校验链路的表现。
+                      先写好系统设定和用户问题，再运行一次，就能检查回答是否靠谱、工具是否用对。
                     </p>
                   </div>
                 </div>
@@ -654,7 +654,7 @@ export function AgentPlayground({ defaultProvider }: AgentPlaygroundProps) {
                 <Tabs defaultValue="answer" className="gap-4">
                   <TabsList variant="line">
                     <TabsTrigger value="answer">回答</TabsTrigger>
-                    <TabsTrigger value="timeline">时间线</TabsTrigger>
+                    <TabsTrigger value="timeline">过程</TabsTrigger>
                     <TabsTrigger value="tools">工具调用</TabsTrigger>
                   </TabsList>
 
@@ -662,7 +662,7 @@ export function AgentPlayground({ defaultProvider }: AgentPlaygroundProps) {
                     <Card size="sm" className="bg-muted/20">
                       <CardHeader>
                         <CardTitle className="text-sm">最终回答</CardTitle>
-                        <CardDescription>返回给 Playground 调用方的结果。</CardDescription>
+                        <CardDescription>本次试运行返回的最终结果。</CardDescription>
                       </CardHeader>
                       <CardContent className="space-y-4">
                         <div className="rounded-lg border border-border bg-background p-4 text-sm leading-7 text-foreground whitespace-pre-wrap">
@@ -673,7 +673,7 @@ export function AgentPlayground({ defaultProvider }: AgentPlaygroundProps) {
                           <div className="grid gap-4 md:grid-cols-2">
                             <div className="rounded-lg border border-border bg-background p-4">
                               <div className="flex items-center justify-between gap-3">
-                                <span className="text-sm font-medium">草稿评审</span>
+                                <span className="text-sm font-medium">草稿审核结果</span>
                                 <Badge
                                   variant={
                                     runResult.result.metrics.draftAccepted
@@ -692,7 +692,7 @@ export function AgentPlayground({ defaultProvider }: AgentPlaygroundProps) {
                               </p>
                             </div>
                             <div className="rounded-lg border border-border bg-background p-4">
-                              <div className="text-sm font-medium">校验置信度</div>
+                              <div className="text-sm font-medium">审核置信度</div>
                               <div className="mt-3 space-y-2">
                                 <Progress value={runResult.result.verifier.confidenceScore * 100} />
                                 <div className="text-sm text-muted-foreground">
@@ -722,9 +722,9 @@ export function AgentPlayground({ defaultProvider }: AgentPlaygroundProps) {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Activity className="size-4 text-primary" aria-hidden="true" />
-                运行健康度
+                稳定性概览
               </CardTitle>
-              <CardDescription>快速查看本次运行的轨迹稳定性与工具表现。</CardDescription>
+              <CardDescription>快速查看本次运行是否稳定，以及工具调用是否顺畅。</CardDescription>
             </CardHeader>
             <CardContent className="grid gap-3">
               <div className="flex items-center justify-between gap-3 text-sm">

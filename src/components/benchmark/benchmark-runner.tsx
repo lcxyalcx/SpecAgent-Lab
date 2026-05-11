@@ -108,12 +108,12 @@ const modeCards = [
   {
     value: "baseline" as const,
     title: "单代理",
-    description: "使用单个智能体和确定性工具执行评测。",
+    description: "由一个智能体直接完成整组任务。",
   },
   {
     value: "draft_verifier" as const,
     title: "草稿 + 校验",
-    description: "对比草稿校验工作流在时延与质量上的取舍。",
+    description: "先生成草稿，再由校验模型复核或改写。",
   },
 ];
 
@@ -166,13 +166,13 @@ export function BenchmarkRunner({ defaultProvider }: BenchmarkRunnerProps) {
 
       if (!response.ok) {
         const suffix = payload.code ? ` [${payload.code}]` : "";
-        setErrorMessage(`${payload.error ?? "无法运行当前 Benchmark。"}${suffix}`);
+        setErrorMessage(`${payload.error ?? "无法开始这次批量测试。"}${suffix}`);
         return;
       }
 
       setResult(payload);
     } catch {
-      setErrorMessage("启动 Benchmark 时发生网络错误。");
+      setErrorMessage("启动批量测试时发生网络错误。");
     } finally {
       setIsSubmitting(false);
     }
@@ -184,9 +184,9 @@ export function BenchmarkRunner({ defaultProvider }: BenchmarkRunnerProps) {
   return (
     <div className="flex flex-col gap-8">
       <PageHeader
-        eyebrow="基准测试"
-        title="运行一组评测任务，并比较不同工作流。"
-        description="选择内置多轮任务，对比单代理和草稿校验两种模式，并查看聚合指标与运行记录。"
+        eyebrow="批量测试"
+        title="一次运行多组任务，快速比较不同模式。"
+        description="选择想要测试的任务，批量运行不同模式，并集中查看成功率、耗时和失败原因。"
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant="outline" className="rounded-md px-2.5 py-1">
@@ -202,7 +202,7 @@ export function BenchmarkRunner({ defaultProvider }: BenchmarkRunnerProps) {
       {errorMessage ? (
         <Alert variant="destructive">
           <TriangleAlert className="size-4" aria-hidden="true" />
-          <AlertTitle>Benchmark 运行失败</AlertTitle>
+          <AlertTitle>批量测试失败</AlertTitle>
           <AlertDescription>{errorMessage}</AlertDescription>
         </Alert>
       ) : null}
@@ -226,7 +226,7 @@ export function BenchmarkRunner({ defaultProvider }: BenchmarkRunnerProps) {
           <TriangleAlert className="size-4" aria-hidden="true" />
           <AlertTitle>结果未持久化</AlertTitle>
           <AlertDescription>
-            当前数据库尚未配置，这次 Benchmark 的结果只会显示在页面中，不会保存到 <span className="font-mono">/runs/[id]</span>。
+            当前数据库尚未配置，这次批量测试的结果只会显示在页面中，不会保存到 <span className="font-mono">/runs/[id]</span>。
           </AlertDescription>
         </Alert>
       ) : null}
@@ -250,7 +250,7 @@ export function BenchmarkRunner({ defaultProvider }: BenchmarkRunnerProps) {
                 任务选择
               </CardTitle>
               <CardDescription>
-                选择一个或多个内置评测任务，发起一次小规模对比运行。
+                选择这次想要批量运行的任务。
               </CardDescription>
             </CardHeader>
             <CardContent className="grid gap-3">
@@ -306,9 +306,9 @@ export function BenchmarkRunner({ defaultProvider }: BenchmarkRunnerProps) {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Sparkles className="size-4 text-primary" aria-hidden="true" />
-                对比模式
+                运行模式
               </CardTitle>
-              <CardDescription>选择你想比较的工作流。</CardDescription>
+              <CardDescription>选择这次要一起比较的模式。</CardDescription>
             </CardHeader>
             <CardContent className="grid gap-3">
               {modeCards.map((mode) => {
@@ -348,7 +348,7 @@ export function BenchmarkRunner({ defaultProvider }: BenchmarkRunnerProps) {
               <div className="rounded-lg border border-border bg-muted/30 p-4">
                 <div className="flex items-center justify-between gap-3">
                   <div>
-                    <div className="text-sm font-medium">运行规模</div>
+                    <div className="text-sm font-medium">本次批量运行</div>
                     <p className="text-sm text-muted-foreground">
                       {selectedTaskIds.length} 个任务 × {selectedModes.length} 种模式
                     </p>
@@ -367,10 +367,10 @@ export function BenchmarkRunner({ defaultProvider }: BenchmarkRunnerProps) {
                   />
                   <div className="grid gap-1">
                     <Label htmlFor="use-llm-judge" className="text-sm font-medium">
-                      使用 LLM 评委打分
+                      启用模型评分
                     </Label>
                     <p className="text-xs leading-5 text-muted-foreground">
-                      可选地再走一遍模型评分，用于生成 rubric 分数。需要{" "}
+                      可选地再走一遍模型评分，用于补充规则评分。需要{" "}
                       <span className="font-mono">OPENAI_API_KEY</span> 或{" "}
                       <span className="font-mono">SILICONFLOW_API_KEY</span>；如果不可用，会回退到启发式评分。
                     </p>
@@ -394,7 +394,7 @@ export function BenchmarkRunner({ defaultProvider }: BenchmarkRunnerProps) {
                   ) : (
                     <>
                       <Gauge className="size-4" aria-hidden="true" />
-                      运行 Benchmark
+                      开始批量测试
                     </>
                   )}
                 </Button>
@@ -407,7 +407,7 @@ export function BenchmarkRunner({ defaultProvider }: BenchmarkRunnerProps) {
           <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             <MetricCard
               icon={CheckCircle2}
-              label="平均成功率"
+              label="平均通过率"
               value={summaryStats.averageSuccess}
               hint="任务成功评分"
             />
@@ -419,7 +419,7 @@ export function BenchmarkRunner({ defaultProvider }: BenchmarkRunnerProps) {
             />
             <MetricCard
               icon={CircleDollarSign}
-              label="平均成本"
+              label="平均费用"
               value={summaryStats.averageCost}
               hint="按单次运行估算"
             />
@@ -433,9 +433,9 @@ export function BenchmarkRunner({ defaultProvider }: BenchmarkRunnerProps) {
 
           <Card className="bg-card/85 shadow-sm">
             <CardHeader>
-              <CardTitle>聚合结果</CardTitle>
+              <CardTitle>汇总结果</CardTitle>
               <CardDescription>
-                按模式汇总成功率、时延、成本、工具稳定性和校验置信度。
+                按模式汇总通过率、耗时、费用和稳定性。
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -443,7 +443,7 @@ export function BenchmarkRunner({ defaultProvider }: BenchmarkRunnerProps) {
 
               {!isSubmitting && !result ? (
                 <div className="rounded-lg border border-dashed border-border bg-muted/30 p-6 text-sm leading-6 text-muted-foreground">
-                  Benchmark 已就绪。建议先从 2 到 3 个任务开始，方便快速比较并检查结果。
+                  建议先从 2 到 3 个任务开始，先跑一轮看看不同模式在真实问题上的表现差异。
                 </div>
               ) : null}
 
@@ -518,7 +518,7 @@ export function BenchmarkRunner({ defaultProvider }: BenchmarkRunnerProps) {
 
           <Card className="bg-card/85 shadow-sm">
             <CardHeader>
-              <CardTitle>运行结果</CardTitle>
+              <CardTitle>单项结果</CardTitle>
               <CardDescription>
                 {result?.persisted
                   ? "每一行都已经落库，可以直接跳转到运行详情页。"
