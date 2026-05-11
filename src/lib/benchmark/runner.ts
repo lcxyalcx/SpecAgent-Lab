@@ -94,7 +94,7 @@ export async function runBenchmark(
 ): Promise<BenchmarkRunnerResult> {
   const useLlmJudge = input.useLlmJudge === true;
   const defaultModels = getDefaultAgentModels(input.providerConfig);
-const benchmarkId = `bench_${Date.now()}`;
+  const benchmarkId = `bench_${Date.now()}`;
   const tasks = benchmarkTaskLibrary.filter((task) => input.taskIds.includes(task.id));
   let persistenceContext: {
     prisma: ReturnType<typeof getPrisma>;
@@ -396,6 +396,9 @@ function buildBenchmarkSystemPrompt(
     `Difficulty: ${task.difficulty}.`,
     `Expected outcome: ${task.expectedOutcome}`,
     `Rubric focus: ${task.evaluationRubric.scoringNotes}`,
+    task.followUpTurns.length > 0
+      ? `Later turns will introduce ${task.followUpTurns.length} follow-up constraints. Plan with those likely updates in mind.`
+      : "Treat this as a realistic multi-turn workflow even if no later constraint is listed.",
   ].join("\n\n");
 }
 
@@ -403,11 +406,25 @@ function buildBenchmarkUserPrompt(task: BenchmarkTaskDefinition) {
   return [
     task.initialPrompt,
     `User goal: ${task.userGoal}`,
+    task.followUpTurns.length > 0
+      ? `Likely follow-up turns:\n${task.followUpTurns
+          .map((turn, index) => `${index + 1}. ${turn}`)
+          .join("\n")}`
+      : "",
+    task.suggestedTools.length > 0
+      ? `Relevant tools when needed: ${task.suggestedTools.join(", ")}`
+      : "",
     "Respond as if this is the current turn of a realistic multi-turn workflow. Be concrete and helpful.",
-  ].join("\n\n");
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 function defaultEnabledToolsForTask(task: BenchmarkTaskDefinition) {
+  if (task.suggestedTools.length > 0) {
+    return task.suggestedTools;
+  }
+
   const categoryToolMap: Record<BenchmarkTaskDefinition["category"], Array<"calculator" | "mockSearch" | "productDb" | "calendar">> = {
     "travel-planning": ["mockSearch", "calendar", "calculator"],
     "customer-support": ["mockSearch", "calculator"],

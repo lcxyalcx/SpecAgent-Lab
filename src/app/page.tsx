@@ -21,10 +21,10 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import {
-  benchmarkTasks,
   buildEvaluationSnapshot,
   DEFAULT_LAB_CONFIG,
 } from "@/lib/mock-evaluation";
+import { benchmarkTaskLibrary } from "@/lib/benchmark/tasks";
 import { getConfiguredAiProvider } from "@/lib/env";
 
 const snapshot = buildEvaluationSnapshot(DEFAULT_LAB_CONFIG);
@@ -56,8 +56,8 @@ export default function Home() {
         items={[
           {
             label: "内置任务",
-            value: String(benchmarkTasks.length),
-            hint: "覆盖常见多轮场景",
+            value: String(benchmarkTaskLibrary.length),
+            hint: "覆盖 60 组真实多轮场景",
             icon: FlaskConical,
           },
           {
@@ -153,7 +153,7 @@ export default function Home() {
             },
             {
               title: "批量比较两种模式",
-              detail: "在批量测试里选择几组任务，对比直接运行和草稿校验的耗时、成功率与错误情况。",
+              detail: "在 60 组客服、旅行、PRD、分析和推荐任务里挑几组，对比两种模式的耗时、成功率与错误情况。",
               icon: FlaskConical,
             },
             {

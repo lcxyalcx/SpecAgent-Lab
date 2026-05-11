@@ -250,7 +250,7 @@ export function BenchmarkRunner({ defaultProvider }: BenchmarkRunnerProps) {
                 任务选择
               </CardTitle>
               <CardDescription>
-                选择这次想要批量运行的任务。
+                选择这次想要批量运行的任务。当前任务库覆盖 60 组典型多轮场景。
               </CardDescription>
             </CardHeader>
             <CardContent className="grid gap-3">
@@ -294,6 +294,12 @@ export function BenchmarkRunner({ defaultProvider }: BenchmarkRunnerProps) {
                     <div className="flex items-center gap-2 text-xs text-muted-foreground">
                       <Badge variant="secondary" className="capitalize">
                         {formatCategory(task.category)}
+                      </Badge>
+                      <Badge variant="outline">
+                        {task.followUpTurns.length + 1} 轮对话
+                      </Badge>
+                      <Badge variant="outline">
+                        {task.suggestedTools.length} 个工具
                       </Badge>
                     </div>
                   </button>
@@ -573,7 +579,7 @@ export function BenchmarkRunner({ defaultProvider }: BenchmarkRunnerProps) {
                               {formatCategory(row.category)}
                             </Badge>
                             <Badge variant="secondary" className="capitalize">
-                              {row.difficulty}
+                              {formatDifficulty(row.difficulty)}
                             </Badge>
                           </div>
                           {row.verifierReason ? (
