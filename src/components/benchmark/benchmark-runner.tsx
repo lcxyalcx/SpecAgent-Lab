@@ -122,6 +122,7 @@ type BenchmarkRunnerProps = {
 };
 
 export function BenchmarkRunner({ defaultProvider }: BenchmarkRunnerProps) {
+  const [selectedTag, setSelectedTag] = useState<string>("全部");
   const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>(
     benchmarkTaskLibrary.slice(0, 3).map((task) => task.id),
   );
@@ -139,6 +140,24 @@ export function BenchmarkRunner({ defaultProvider }: BenchmarkRunnerProps) {
     () =>
       benchmarkTaskLibrary.filter((task) => selectedTaskIds.includes(task.id)),
     [selectedTaskIds],
+  );
+  const availableTags = useMemo(() => {
+    const tags = new Set<string>(["全部"]);
+
+    for (const task of benchmarkTaskLibrary) {
+      for (const tag of task.tags) {
+        tags.add(tag);
+      }
+    }
+
+    return Array.from(tags);
+  }, []);
+  const visibleTasks = useMemo(
+    () =>
+      selectedTag === "全部"
+        ? benchmarkTaskLibrary
+        : benchmarkTaskLibrary.filter((task) => task.tags.includes(selectedTag)),
+    [selectedTag],
   );
 
   async function handleRunBenchmark() {
@@ -250,11 +269,31 @@ export function BenchmarkRunner({ defaultProvider }: BenchmarkRunnerProps) {
                 任务选择
               </CardTitle>
               <CardDescription>
-                选择这次想要批量运行的任务。当前任务库覆盖 60 组典型多轮场景。
+                选择这次想要批量运行的任务。当前任务库覆盖 60 组典型多轮场景，也支持按标签快速筛选。
               </CardDescription>
             </CardHeader>
             <CardContent className="grid gap-3">
-              {benchmarkTaskLibrary.map((task) => {
+              <div className="flex flex-wrap gap-2">
+                {availableTags.map((tag) => (
+                  <button
+                    key={tag}
+                    type="button"
+                    onClick={() => setSelectedTag(tag)}
+                    className={cn(
+                      "rounded-full border px-3 py-1 text-xs transition-colors",
+                      selectedTag === tag
+                        ? "border-primary/40 bg-primary/8 text-primary"
+                        : "border-border bg-background text-muted-foreground hover:bg-muted/40",
+                    )}
+                  >
+                    {tag}
+                  </button>
+                ))}
+              </div>
+              <div className="text-xs text-muted-foreground">
+                当前显示 {visibleTasks.length} 个任务
+              </div>
+              {visibleTasks.map((task) => {
                 const isSelected = selectedTaskIds.includes(task.id);
 
                 return (
@@ -301,6 +340,13 @@ export function BenchmarkRunner({ defaultProvider }: BenchmarkRunnerProps) {
                       <Badge variant="outline">
                         {task.suggestedTools.length} 个工具
                       </Badge>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {task.tags.slice(0, 4).map((tag) => (
+                        <Badge key={tag} variant="outline" className="text-[11px]">
+                          {tag}
+                        </Badge>
+                      ))}
                     </div>
                   </button>
                 );

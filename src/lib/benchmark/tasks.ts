@@ -28,6 +28,7 @@ export type BenchmarkTaskDefinition = {
   expectedOutcome: string;
   followUpTurns: string[];
   suggestedTools: BenchmarkTool[];
+  tags: string[];
   evaluationRubric: {
     successCriteria: string[];
     failureModes: string[];
@@ -45,6 +46,7 @@ type TaskSeed = {
   expectedOutcome: string;
   followUpTurns: string[];
   suggestedTools: BenchmarkTool[];
+  tags?: string[];
   scoringFocus: string;
 };
 
@@ -171,12 +173,44 @@ function buildRubric(seed: TaskSeed): BenchmarkTaskDefinition["evaluationRubric"
 function createTask(seed: TaskSeed): BenchmarkTaskDefinition {
   return {
     ...seed,
+    tags: buildTags(seed),
     evaluationRubric: buildRubric(seed),
   };
 }
 
 function createTasks(seeds: TaskSeed[]) {
   return seeds.map(createTask);
+}
+
+function buildTags(seed: TaskSeed) {
+  const categoryTags: Record<BenchmarkTaskCategory, string[]> = {
+    "travel-planning": ["旅行规划", "多约束"],
+    "customer-support": ["客服问答", "政策判断"],
+    "product-requirement-clarification": ["PRD 生成", "需求澄清"],
+    "data-analysis": ["数据分析", "诊断排查"],
+    "coding-assistant": ["代码协作", "问题定位"],
+    "meeting-summarization": ["会议总结", "信息整理"],
+    "product-recommendation": ["商品推荐", "方案比较"],
+    "budget-planning": ["预算规划", "资源分配"],
+    "multi-constraint-decision-making": ["决策支持", "多约束"],
+    "agent-self-correction": ["自我纠偏", "上下文修正"],
+  };
+
+  const traitTags = [
+    seed.difficulty === "hard" ? "高难度" : null,
+    seed.followUpTurns.length >= 3 ? "多轮追问" : null,
+    seed.suggestedTools.length >= 3 ? "多工具" : null,
+    seed.suggestedTools.includes("calculator") ? "需要计算" : null,
+    seed.suggestedTools.includes("calendar") ? "时间安排" : null,
+    seed.suggestedTools.includes("productDb") ? "商品库" : null,
+    seed.suggestedTools.includes("mockSearch") ? "信息检索" : null,
+  ];
+
+  return [...new Set([
+    ...categoryTags[seed.category],
+    ...traitTags.filter((tag): tag is string => Boolean(tag)),
+    ...(seed.tags ?? []),
+  ])];
 }
 
 const travelPlanningTasks = createTasks([
