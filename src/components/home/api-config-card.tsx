@@ -16,30 +16,39 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { apiProviderConfigSchema, CLIENT_API_CONFIG_STORAGE_KEY, type ApiProviderConfig } from "@/lib/ai/config";
+import type { AiProvider } from "@/lib/ai/catalog";
 
 const providerPresets = {
   openai: {
     label: "OpenAI",
     placeholder: "sk-...",
     baseURL: "",
-    helper: "Uses the default OpenAI endpoint.",
+    helper: "使用 OpenAI 官方默认接口。",
   },
   siliconflow: {
     label: "SiliconFlow",
     placeholder: "sk-...",
     baseURL: "https://api.siliconflow.cn/v1",
-    helper: "OpenAI-compatible endpoint for SiliconFlow.",
+    helper: "使用 SiliconFlow 的 OpenAI 兼容接口。",
   },
 } as const;
 
-const defaultConfig: ApiProviderConfig = {
-  provider: "siliconflow",
-  apiKey: "",
-  baseURL: providerPresets.siliconflow.baseURL,
+function buildDefaultConfig(provider: AiProvider): ApiProviderConfig {
+  return {
+    provider,
+    apiKey: "",
+    baseURL: provider === "siliconflow" ? providerPresets.siliconflow.baseURL : "",
+  };
+}
+
+type ApiConfigCardProps = {
+  defaultProvider: AiProvider;
 };
 
-export function ApiConfigCard() {
-  const [formState, setFormState] = useState<ApiProviderConfig>(defaultConfig);
+export function ApiConfigCard({ defaultProvider }: ApiConfigCardProps) {
+  const [formState, setFormState] = useState<ApiProviderConfig>(() =>
+    buildDefaultConfig(defaultProvider),
+  );
   const [isSaved, setIsSaved] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
@@ -49,6 +58,7 @@ export function ApiConfigCard() {
         const raw = window.localStorage.getItem(CLIENT_API_CONFIG_STORAGE_KEY);
 
         if (!raw) {
+          setFormState(buildDefaultConfig(defaultProvider));
           setIsSaved(false);
           return;
         }
@@ -60,13 +70,15 @@ export function ApiConfigCard() {
           return;
         }
 
+        setFormState(buildDefaultConfig(defaultProvider));
         setIsSaved(false);
       } catch {
         // Ignore malformed local state and fall back to defaults.
+        setFormState(buildDefaultConfig(defaultProvider));
         setIsSaved(false);
       }
     });
-  }, []);
+  }, [defaultProvider]);
 
   function handleProviderChange(provider: ApiProviderConfig["provider"]) {
     setFormState((current) => ({
@@ -89,7 +101,7 @@ export function ApiConfigCard() {
     });
 
     if (!parsed.success) {
-      setStatusMessage("Please provide a valid provider, API key, and base URL when needed.");
+      setStatusMessage("请填写有效的供应商、API Key，以及在需要时填写正确的 Base URL。");
       return;
     }
 
@@ -99,15 +111,15 @@ export function ApiConfigCard() {
     );
     window.dispatchEvent(new Event("specagent-api-config-changed"));
     setIsSaved(true);
-    setStatusMessage("Saved locally in this browser. Playground and benchmark will use it automatically.");
+    setStatusMessage("已保存到当前浏览器，本地 Playground 和 Benchmark 会自动使用这组配置。");
   }
 
   function handleClear() {
     window.localStorage.removeItem(CLIENT_API_CONFIG_STORAGE_KEY);
     window.dispatchEvent(new Event("specagent-api-config-changed"));
-    setFormState(defaultConfig);
+    setFormState(buildDefaultConfig(defaultProvider));
     setIsSaved(false);
-    setStatusMessage("Cleared local API configuration.");
+    setStatusMessage("已清除当前浏览器中的本地 API 配置。");
   }
 
   return (
@@ -117,24 +129,24 @@ export function ApiConfigCard() {
           <div>
             <CardTitle className="flex items-center gap-2">
               <KeyRound className="size-4 text-primary" aria-hidden="true" />
-              API Configuration
+              API 配置
             </CardTitle>
             <CardDescription>
-              Add your own model provider credentials here, CC Switch style. The key stays in your browser and is sent only when you run playground or benchmark jobs.
+              可以在这里填写你自己的模型供应商凭证。密钥仅保存在当前浏览器里，只有运行 Playground 或 Benchmark 时才会随请求发送。
             </CardDescription>
           </div>
           <Badge variant={isSaved ? "default" : "outline"} className="rounded-md">
-            {isSaved ? "Local config ready" : "Not configured"}
+            {isSaved ? "本地配置已就绪" : "尚未配置"}
           </Badge>
         </div>
       </CardHeader>
       <CardContent className="grid gap-4">
         <div className="grid gap-2 md:grid-cols-[1fr_1.1fr]">
           <div className="grid gap-2">
-            <Label htmlFor="api-provider">Provider</Label>
+            <Label htmlFor="api-provider">供应商</Label>
             <Select value={formState.provider} onValueChange={handleProviderChange}>
               <SelectTrigger id="api-provider">
-                <SelectValue placeholder="Choose provider" />
+                <SelectValue placeholder="选择供应商" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="siliconflow">SiliconFlow</SelectItem>
@@ -143,7 +155,7 @@ export function ApiConfigCard() {
             </Select>
           </div>
           <div className="grid gap-2">
-            <Label htmlFor="api-key">API key</Label>
+            <Label htmlFor="api-key">API Key</Label>
             <Input
               id="api-key"
               type="password"
@@ -184,22 +196,22 @@ export function ApiConfigCard() {
               <ShieldCheck className="size-4" aria-hidden="true" />
             </div>
             <div className="grid gap-1">
-              <div className="font-medium">How it works</div>
+              <div className="font-medium">工作方式</div>
               <p className="text-muted-foreground">
-                {providerPresets[formState.provider].helper} This config is stored in
-                local storage, so each browser can bring its own provider without changing server secrets.
+                {providerPresets[formState.provider].helper}
+                这组配置会存到当前浏览器的 Local Storage，因此不同浏览器可以各自使用自己的供应商，而不用修改服务器端密钥。
               </p>
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant="secondary" className="rounded-md">
-              Homepage controlled
+              首页统一管理
             </Badge>
             <Badge variant="outline" className="rounded-md">
-              Playground compatible
+              Playground 可用
             </Badge>
             <Badge variant="outline" className="rounded-md">
-              Benchmark compatible
+              Benchmark 可用
             </Badge>
           </div>
         </div>
@@ -207,11 +219,11 @@ export function ApiConfigCard() {
         <div className="flex flex-wrap items-center gap-3">
           <Button onClick={handleSave}>
             <Sparkles className="size-4" aria-hidden="true" />
-            Save local API config
+            保存本地 API 配置
           </Button>
           <Button type="button" variant="outline" onClick={handleClear}>
             <RotateCcw className="size-4" aria-hidden="true" />
-            Clear
+            清除
           </Button>
           {statusMessage ? (
             <div className="inline-flex items-center gap-2 text-sm text-muted-foreground">

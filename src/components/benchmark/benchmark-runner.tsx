@@ -45,6 +45,7 @@ import {
   type BenchmarkTaskDefinition,
 } from "@/lib/benchmark/tasks";
 import { useLocalApiConfig } from "@/hooks/use-local-api-config";
+import { getProviderLabel, type AiProvider } from "@/lib/ai/catalog";
 import { cn } from "@/lib/utils";
 
 type BenchmarkMode = "baseline" | "draft_verifier";
@@ -79,6 +80,7 @@ type BenchmarkRunResponse = {
     toolErrorCount: number;
     draftAccepted: boolean | null;
     verifierReason: string | null;
+    error: string | null;
   }>;
   aggregates: Array<{
     mode: BenchmarkMode;
@@ -95,7 +97,7 @@ type BenchmarkRunResponse = {
   }>;
 };
 
-const compactCurrency = new Intl.NumberFormat("en-US", {
+const compactCurrency = new Intl.NumberFormat("zh-CN", {
   style: "currency",
   currency: "USD",
   minimumFractionDigits: 3,
@@ -105,17 +107,21 @@ const compactCurrency = new Intl.NumberFormat("en-US", {
 const modeCards = [
   {
     value: "baseline" as const,
-    title: "Baseline",
-    description: "Single-agent benchmark pass with deterministic tools.",
+    title: "单代理",
+    description: "使用单个智能体和确定性工具执行评测。",
   },
   {
     value: "draft_verifier" as const,
-    title: "Draft + Verifier",
-    description: "Speculative-style comparison mode for latency and quality tradeoffs.",
+    title: "草稿 + 校验",
+    description: "对比草稿校验工作流在时延与质量上的取舍。",
   },
 ];
 
-export function BenchmarkRunner() {
+type BenchmarkRunnerProps = {
+  defaultProvider: AiProvider;
+};
+
+export function BenchmarkRunner({ defaultProvider }: BenchmarkRunnerProps) {
   const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>(
     benchmarkTaskLibrary.slice(0, 3).map((task) => task.id),
   );
@@ -160,33 +166,34 @@ export function BenchmarkRunner() {
 
       if (!response.ok) {
         const suffix = payload.code ? ` [${payload.code}]` : "";
-        setErrorMessage(`${payload.error ?? "Unable to run benchmark."}${suffix}`);
+        setErrorMessage(`${payload.error ?? "无法运行当前 Benchmark。"}${suffix}`);
         return;
       }
 
       setResult(payload);
     } catch {
-      setErrorMessage("Network error while starting the benchmark.");
+      setErrorMessage("启动 Benchmark 时发生网络错误。");
     } finally {
       setIsSubmitting(false);
     }
   }
 
   const summaryStats = buildSummaryStats(result);
+  const failedRuns = result?.results.filter((row) => row.status === "failed") ?? [];
 
   return (
     <div className="flex flex-col gap-8">
       <PageHeader
-        eyebrow="Benchmark"
-        title="Run a benchmark pack and compare workflow modes."
-        description="Select built-in multi-turn tasks, choose the baseline and speculative-style draft-verifier modes to compare, and review aggregated product metrics plus persisted run links."
+        eyebrow="基准测试"
+        title="运行一组评测任务，并比较不同工作流。"
+        description="选择内置多轮任务，对比单代理和草稿校验两种模式，并查看聚合指标与运行记录。"
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant="outline" className="rounded-md px-2.5 py-1">
-              {selectedTasks.length} tasks selected
+              已选 {selectedTasks.length} 个任务
             </Badge>
             <Badge variant="outline" className="rounded-md px-2.5 py-1">
-              {selectedModes.length} modes
+              {selectedModes.length} 种模式
             </Badge>
           </div>
         }
@@ -195,7 +202,7 @@ export function BenchmarkRunner() {
       {errorMessage ? (
         <Alert variant="destructive">
           <TriangleAlert className="size-4" aria-hidden="true" />
-          <AlertTitle>Benchmark failed</AlertTitle>
+          <AlertTitle>Benchmark 运行失败</AlertTitle>
           <AlertDescription>{errorMessage}</AlertDescription>
         </Alert>
       ) : null}
@@ -204,12 +211,12 @@ export function BenchmarkRunner() {
         <Alert>
           <Sparkles className="size-4" aria-hidden="true" />
           <AlertTitle>
-            {isConfigured ? "Benchmark will use your browser API config" : "Add an API config on the homepage first"}
+            {isConfigured ? "已检测到浏览器侧 API 配置" : "当前未检测到浏览器侧 API 配置"}
           </AlertTitle>
           <AlertDescription>
             {isConfigured
-              ? `Selected tasks will call ${providerConfig?.provider} with the local credentials saved on the homepage.`
-              : "Without a homepage API config, benchmark runs still depend on server environment variables and may return no result online."}
+              ? `本次会优先使用首页保存的 ${getProviderLabel(providerConfig?.provider ?? defaultProvider)} 本地凭证运行所选任务。`
+              : `当前会回退使用部署环境中的 ${getProviderLabel(defaultProvider)} 配置。若线上未设置密钥，请先回首页填写本地 API 配置。`}
           </AlertDescription>
         </Alert>
       ) : null}
@@ -217,9 +224,19 @@ export function BenchmarkRunner() {
       {result && !result.persisted ? (
         <Alert>
           <TriangleAlert className="size-4" aria-hidden="true" />
-          <AlertTitle>Transient benchmark results</AlertTitle>
+          <AlertTitle>结果未持久化</AlertTitle>
           <AlertDescription>
-            Database persistence is not configured, so this benchmark ran successfully but the rows below are not saved to <span className="font-mono">/runs/[id]</span>.
+            当前数据库尚未配置，这次 Benchmark 的结果只会显示在页面中，不会保存到 <span className="font-mono">/runs/[id]</span>。
+          </AlertDescription>
+        </Alert>
+      ) : null}
+
+      {failedRuns.length > 0 ? (
+        <Alert variant="destructive">
+          <TriangleAlert className="size-4" aria-hidden="true" />
+          <AlertTitle>部分任务执行失败</AlertTitle>
+          <AlertDescription>
+            有 {failedRuns.length} 条运行返回失败。你可以在下方结果表查看具体任务与错误原因。
           </AlertDescription>
         </Alert>
       ) : null}
@@ -230,10 +247,10 @@ export function BenchmarkRunner() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <ListChecks className="size-4 text-primary" aria-hidden="true" />
-                Task Selection
+                任务选择
               </CardTitle>
               <CardDescription>
-                Choose one or more seeded benchmark tasks for a small evaluation pass.
+                选择一个或多个内置评测任务，发起一次小规模对比运行。
               </CardDescription>
             </CardHeader>
             <CardContent className="grid gap-3">
@@ -260,16 +277,18 @@ export function BenchmarkRunner() {
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div>
-                        <div className="font-medium">{task.title}</div>
+                        <div className="font-medium">
+                          {formatTaskTitle(task.id, task.title)}
+                        </div>
                         <div className="mt-1 text-sm leading-6 text-muted-foreground">
-                          {task.userGoal}
+                          {formatTaskGoal(task.id, task.userGoal)}
                         </div>
                       </div>
                       <Badge
                         variant={isSelected ? "default" : "outline"}
                         className="capitalize"
                       >
-                        {task.difficulty}
+                        {formatDifficulty(task.difficulty)}
                       </Badge>
                     </div>
                     <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -287,9 +306,9 @@ export function BenchmarkRunner() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Sparkles className="size-4 text-primary" aria-hidden="true" />
-                Comparison Modes
+                对比模式
               </CardTitle>
-              <CardDescription>Select the workflows you want to compare.</CardDescription>
+              <CardDescription>选择你想比较的工作流。</CardDescription>
             </CardHeader>
             <CardContent className="grid gap-3">
               {modeCards.map((mode) => {
@@ -316,7 +335,7 @@ export function BenchmarkRunner() {
                     <div className="flex items-center justify-between gap-3">
                       <span className="font-medium">{mode.title}</span>
                       <Badge variant={isSelected ? "default" : "outline"}>
-                        {isSelected ? "Included" : "Off"}
+                        {isSelected ? "已纳入" : "关闭"}
                       </Badge>
                     </div>
                     <p className="text-sm leading-6 text-muted-foreground">
@@ -329,9 +348,9 @@ export function BenchmarkRunner() {
               <div className="rounded-lg border border-border bg-muted/30 p-4">
                 <div className="flex items-center justify-between gap-3">
                   <div>
-                    <div className="text-sm font-medium">Benchmark pass</div>
+                    <div className="text-sm font-medium">运行规模</div>
                     <p className="text-sm text-muted-foreground">
-                      {selectedTaskIds.length} tasks × {selectedModes.length} modes
+                      {selectedTaskIds.length} 个任务 × {selectedModes.length} 种模式
                     </p>
                   </div>
                   <div className="flex size-10 items-center justify-center rounded-lg border border-primary/15 bg-primary/8 text-primary">
@@ -348,13 +367,12 @@ export function BenchmarkRunner() {
                   />
                   <div className="grid gap-1">
                     <Label htmlFor="use-llm-judge" className="text-sm font-medium">
-                      LLM-as-judge scoring
+                      使用 LLM 评委打分
                     </Label>
                     <p className="text-xs leading-5 text-muted-foreground">
-                      Optional second model pass for rubric scores. Requires{" "}
-                      <span className="font-mono">OPENAI_API_KEY</span> or{" "}
-                      <span className="font-mono">SILICONFLOW_API_KEY</span>; falls back to heuristic if
-                      unavailable.
+                      可选地再走一遍模型评分，用于生成 rubric 分数。需要{" "}
+                      <span className="font-mono">OPENAI_API_KEY</span> 或{" "}
+                      <span className="font-mono">SILICONFLOW_API_KEY</span>；如果不可用，会回退到启发式评分。
                     </p>
                   </div>
                 </div>
@@ -371,12 +389,12 @@ export function BenchmarkRunner() {
                   {isSubmitting ? (
                     <>
                       <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />
-                      Running benchmark
+                      正在运行
                     </>
                   ) : (
                     <>
                       <Gauge className="size-4" aria-hidden="true" />
-                      Run Benchmark
+                      运行 Benchmark
                     </>
                   )}
                 </Button>
@@ -389,35 +407,35 @@ export function BenchmarkRunner() {
           <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             <MetricCard
               icon={CheckCircle2}
-              label="Avg success"
+              label="平均成功率"
               value={summaryStats.averageSuccess}
-              hint="Task success score"
+              hint="任务成功评分"
             />
             <MetricCard
               icon={Timer}
-              label="Avg latency"
+              label="平均时延"
               value={summaryStats.averageLatency}
-              hint="Across all selected runs"
+              hint="全部选中运行的均值"
             />
             <MetricCard
               icon={CircleDollarSign}
-              label="Avg cost"
+              label="平均成本"
               value={summaryStats.averageCost}
-              hint="Estimated per run"
+              hint="按单次运行估算"
             />
             <MetricCard
               icon={ShieldCheck}
-              label="Draft accept"
+              label="草稿接受率"
               value={summaryStats.draftAcceptance}
-              hint="Draft-verifier only"
+              hint="仅草稿校验模式"
             />
           </section>
 
           <Card className="bg-card/85 shadow-sm">
             <CardHeader>
-              <CardTitle>Aggregate Results</CardTitle>
+              <CardTitle>聚合结果</CardTitle>
               <CardDescription>
-                Mode-level averages for success, latency, cost, tool reliability, and verifier confidence.
+                按模式汇总成功率、时延、成本、工具稳定性和校验置信度。
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -425,7 +443,7 @@ export function BenchmarkRunner() {
 
               {!isSubmitting && !result ? (
                 <div className="rounded-lg border border-dashed border-border bg-muted/30 p-6 text-sm leading-6 text-muted-foreground">
-                  The benchmark runner is ready. Start with two or three tasks to keep the comparison quick and easy to inspect.
+                  Benchmark 已就绪。建议先从 2 到 3 个任务开始，方便快速比较并检查结果。
                 </div>
               ) : null}
 
@@ -436,57 +454,57 @@ export function BenchmarkRunner() {
                       <CardHeader>
                         <CardTitle className="text-sm">
                           {aggregate.mode === "baseline"
-                            ? "Baseline"
-                            : "Draft + Verifier"}
+                            ? "单代理"
+                            : "草稿 + 校验"}
                         </CardTitle>
                         <CardDescription>
-                          {aggregate.runCount} {result.persisted ? "persisted" : "transient"} benchmark runs
+                          {aggregate.runCount} 次{result.persisted ? "已持久化" : "临时"}运行
                         </CardDescription>
                       </CardHeader>
                       <CardContent className="grid gap-3 text-sm">
                         <AggregateRow
-                          label="Task success"
+                          label="任务成功率"
                           value={formatPercent(aggregate.averageTaskSuccessScore)}
                         />
                         <AggregateRow
-                          label="Reasoning quality"
+                          label="推理质量"
                           value={formatPercent(aggregate.averageReasoningQualityScore)}
                         />
                         <AggregateRow
-                          label="Constraint satisfaction"
+                          label="约束满足度"
                           value={formatPercent(aggregate.averageConstraintSatisfactionScore)}
                         />
                         <AggregateRow
-                          label="Tool-use score"
+                          label="工具使用评分"
                           value={formatPercent(aggregate.averageToolUseScore)}
                         />
                         <AggregateRow
-                          label="Latency"
+                          label="时延"
                           value={formatMs(aggregate.averageLatencyMs)}
                         />
                         <AggregateRow
-                          label="Estimated cost"
+                          label="预估成本"
                           value={compactCurrency.format(
                             aggregate.averageEstimatedCostUsd,
                           )}
                         />
                         <AggregateRow
-                          label="Tool error rate"
+                          label="工具报错率"
                           value={formatPercent(aggregate.averageToolErrorRate)}
                         />
                         <AggregateRow
-                          label="Draft acceptance"
+                          label="草稿接受率"
                           value={
                             aggregate.draftAcceptanceRate === null
-                              ? "N/A"
+                              ? "不适用"
                               : formatPercent(aggregate.draftAcceptanceRate)
                           }
                         />
                         <AggregateRow
-                          label="Avg confidence"
+                          label="平均置信度"
                           value={
                             aggregate.averageConfidenceScore === null
-                              ? "N/A"
+                              ? "不适用"
                               : formatPercent(aggregate.averageConfidenceScore)
                           }
                         />
@@ -500,11 +518,11 @@ export function BenchmarkRunner() {
 
           <Card className="bg-card/85 shadow-sm">
             <CardHeader>
-              <CardTitle>Run Results</CardTitle>
+              <CardTitle>运行结果</CardTitle>
               <CardDescription>
                 {result?.persisted
-                  ? "Each row is persisted and links to the run detail route."
-                  : "Rows are shown immediately even without a database; enable DATABASE_URL to get saved run detail links."}
+                  ? "每一行都已经落库，可以直接跳转到运行详情页。"
+                  : "即使没有数据库，也会先显示结果；配置 DATABASE_URL 后可获得可持久化的详情链接。"}
               </CardDescription>
             </CardHeader>
             <CardContent className="overflow-x-auto">
@@ -514,40 +532,42 @@ export function BenchmarkRunner() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Task</TableHead>
-                      <TableHead>Mode</TableHead>
-                      <TableHead>Success</TableHead>
+                      <TableHead>任务</TableHead>
+                      <TableHead>模式</TableHead>
+                      <TableHead>成功率</TableHead>
                       <TableHead className="whitespace-nowrap">
                         <span className="inline-flex items-center gap-1">
                           <Brain className="size-3.5" aria-hidden="true" />
-                          Reason
+                          推理
                         </span>
                       </TableHead>
                       <TableHead className="whitespace-nowrap">
                         <span className="inline-flex items-center gap-1">
                           <ListTodo className="size-3.5" aria-hidden="true" />
-                          Constr.
+                          约束
                         </span>
                       </TableHead>
                       <TableHead className="whitespace-nowrap">
                         <span className="inline-flex items-center gap-1">
                           <Scale className="size-3.5" aria-hidden="true" />
-                          Tools
+                          工具
                         </span>
                       </TableHead>
-                      <TableHead>Latency</TableHead>
-                      <TableHead>Cost</TableHead>
-                      <TableHead>Tool error</TableHead>
-                      <TableHead>Draft</TableHead>
-                      <TableHead>Confidence</TableHead>
-                      <TableHead className="text-right">Run</TableHead>
+                      <TableHead>时延</TableHead>
+                      <TableHead>成本</TableHead>
+                      <TableHead>工具报错</TableHead>
+                      <TableHead>草稿</TableHead>
+                      <TableHead>置信度</TableHead>
+                      <TableHead className="text-right">详情</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {result.results.map((row) => (
                       <TableRow key={row.runId}>
                         <TableCell className="min-w-72">
-                          <div className="font-medium">{row.taskTitle}</div>
+                          <div className="font-medium">
+                            {formatTaskTitle(row.taskId, row.taskTitle)}
+                          </div>
                           <div className="mt-1 flex items-center gap-2">
                             <Badge variant="outline" className="capitalize">
                               {formatCategory(row.category)}
@@ -559,6 +579,11 @@ export function BenchmarkRunner() {
                           {row.verifierReason ? (
                             <div className="mt-2 text-xs leading-5 text-muted-foreground">
                               {row.verifierReason}
+                            </div>
+                          ) : null}
+                          {row.error ? (
+                            <div className="mt-2 rounded-md border border-destructive/20 bg-destructive/5 px-2.5 py-2 text-xs leading-5 text-destructive">
+                              {row.error}
                             </div>
                           ) : null}
                           {row.metrics.evaluationExplanation ? (
@@ -573,8 +598,8 @@ export function BenchmarkRunner() {
                         <TableCell>
                           <Badge variant="outline">
                             {row.mode === "baseline"
-                              ? "Baseline"
-                              : "Draft + Verifier"}
+                              ? "单代理"
+                              : "草稿 + 校验"}
                           </Badge>
                         </TableCell>
                         <TableCell>{formatPercent(row.metrics.taskSuccessScore)}</TableCell>
@@ -592,30 +617,30 @@ export function BenchmarkRunner() {
                         <TableCell>{formatPercent(row.metrics.toolErrorRate)}</TableCell>
                         <TableCell>
                           {row.draftAccepted === null ? (
-                            <span className="text-muted-foreground">N/A</span>
+                            <span className="text-muted-foreground">不适用</span>
                           ) : (
                             <Badge
                               variant={row.draftAccepted ? "secondary" : "outline"}
                             >
-                              {row.draftAccepted ? "Accepted" : "Rejected"}
+                              {row.draftAccepted ? "已接受" : "已拒绝"}
                             </Badge>
                           )}
                         </TableCell>
                         <TableCell>
                           {row.metrics.averageConfidenceScore === null
-                            ? "N/A"
+                            ? "不适用"
                             : formatPercent(row.metrics.averageConfidenceScore)}
                         </TableCell>
                         <TableCell className="text-right">
                           {row.persisted ? (
                             <Button asChild size="sm" variant="outline">
                               <Link href={`/runs/${encodeURIComponent(row.runId)}`}>
-                                Open
+                                打开
                                 <ArrowRight className="size-4" aria-hidden="true" />
                               </Link>
                             </Button>
                           ) : (
-                            <span className="text-sm text-muted-foreground">Transient</span>
+                            <span className="text-sm text-muted-foreground">未保存</span>
                           )}
                         </TableCell>
                       </TableRow>
@@ -696,7 +721,7 @@ function buildSummaryStats(result: BenchmarkRunResponse | null) {
       averageSuccess: "—",
       averageLatency: "—",
       averageCost: "—",
-      draftAcceptance: "N/A",
+      draftAcceptance: "不适用",
     };
   }
 
@@ -723,7 +748,7 @@ function buildSummaryStats(result: BenchmarkRunResponse | null) {
     averageCost: compactCurrency.format(averageCost),
     draftAcceptance:
       draftRates.length === 0
-        ? "N/A"
+        ? "不适用"
         : formatPercent(
             draftRates.reduce((sum, value) => sum + value, 0) / draftRates.length,
           ),
@@ -731,7 +756,74 @@ function buildSummaryStats(result: BenchmarkRunResponse | null) {
 }
 
 function formatCategory(category: string) {
-  return category.replaceAll("-", " ");
+  const labels: Record<string, string> = {
+    "travel-planning": "行程规划",
+    "customer-support": "客服支持",
+    "product-requirement-clarification": "需求澄清",
+    "data-analysis": "数据分析",
+    "coding-assistant": "代码协作",
+    "meeting-summarization": "会议总结",
+    "product-recommendation": "产品推荐",
+    "budget-planning": "预算规划",
+    "multi-constraint-decision-making": "多约束决策",
+    "agent-self-correction": "智能体自纠偏",
+  };
+
+  return labels[category] ?? category.replaceAll("-", " ");
+}
+
+function formatTaskTitle(taskId: string, fallback: string) {
+  const labels: Record<string, string> = {
+    "travel-europe-family-itinerary": "预算内的欧洲亲子行程规划",
+    "support-refund-escalation": "处理带政策边界的退款请求",
+    "prd-clarification-for-ai-feature": "澄清模糊的 AI 功能需求",
+    "sales-dataset-diagnosis": "诊断销售漏斗转化下滑",
+    "codebase-bug-fix-guidance": "排查 Web 应用中的异步疑难问题",
+    "executive-meeting-synthesis": "整理混乱的管理层会议记录",
+    "laptop-recommendation-tradeoffs": "在需求变化下推荐合适笔记本",
+    "quarterly-team-budget-plan": "规划季度团队预算",
+    "vendor-selection-under-constraints": "在多重约束下选择供应商",
+    "agent-self-correction-after-misread": "在误解需求后完成自我纠偏",
+  };
+
+  return labels[taskId] ?? fallback;
+}
+
+function formatTaskGoal(taskId: string, fallback: string) {
+  const labels: Record<string, string> = {
+    "travel-europe-family-itinerary":
+      "产出一份可随着到达时间、酒店位置和总预算变化而调整的真实行程安排。",
+    "support-refund-escalation":
+      "给出依据政策、语气稳妥且能随着新订单信息调整的客服处理方案。",
+    "prd-clarification-for-ai-feature":
+      "通过多轮澄清，把模糊想法收敛成目标用户、场景、非目标和指标都清晰的需求方案。",
+    "sales-dataset-diagnosis":
+      "像分析师一样逐步排查问题，在新数据不断出现时持续修正判断。",
+    "codebase-bug-fix-guidance":
+      "像结对工程师一样识别关键线索，提出可验证的修复方向与验证方案。",
+    "executive-meeting-synthesis":
+      "把零散会议笔记整理成清晰摘要，并在后续信息冲突时继续修正。",
+    "laptop-recommendation-tradeoffs":
+      "随着预算、系统偏好和性能要求变化，持续给出有取舍解释的推荐。",
+    "quarterly-team-budget-plan":
+      "产出一份能随招聘计划、削减目标和依赖变化而调整的务实预算方案。",
+    "vendor-selection-under-constraints":
+      "在安全、速度、成本等多目标冲突时，给出透明可解释的取舍过程。",
+    "agent-self-correction-after-misread":
+      "检查智能体能否承认误解、纠正上下文，并继续高质量完成后续任务。",
+  };
+
+  return labels[taskId] ?? fallback;
+}
+
+function formatDifficulty(difficulty: BenchmarkTaskDefinition["difficulty"]) {
+  const labels: Record<BenchmarkTaskDefinition["difficulty"], string> = {
+    easy: "简单",
+    medium: "中等",
+    hard: "困难",
+  };
+
+  return labels[difficulty];
 }
 
 function formatPercent(value: number) {
@@ -739,5 +831,5 @@ function formatPercent(value: number) {
 }
 
 function formatMs(value: number) {
-  return `${value.toLocaleString()} ms`;
+  return `${value.toLocaleString("zh-CN")} ms`;
 }

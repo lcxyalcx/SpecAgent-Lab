@@ -35,53 +35,49 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { useLocalApiConfig } from "@/hooks/use-local-api-config";
+import {
+  getDefaultModelsForProvider,
+  getModelOptionsForProvider,
+  getProviderLabel,
+  isKnownModelCompatibleWithProvider,
+  type AiProvider,
+} from "@/lib/ai/catalog";
 import { cn } from "@/lib/utils";
 
 const toolOptions = [
   {
     id: "calculator",
-    label: "Calculator",
-    description: "Deterministic arithmetic and guardrails for unsafe expressions.",
+    label: "计算器",
+    description: "执行确定性计算，并对不安全表达式做保护。",
   },
   {
     id: "mockSearch",
-    label: "Mock Search",
-    description: "Local corpus retrieval with stable result ordering.",
+    label: "模拟搜索",
+    description: "查询本地知识库，并保持稳定的结果排序。",
   },
   {
     id: "productDb",
-    label: "Product DB",
-    description: "Structured product options for recommendation tasks.",
+    label: "产品库",
+    description: "为推荐类任务提供结构化商品信息。",
   },
   {
     id: "calendar",
-    label: "Calendar",
-    description: "Mock availability slots for planning scenarios.",
+    label: "日历",
+    description: "为规划类场景提供模拟空闲时间段。",
   },
 ] as const;
 
 const modeOptions = [
   {
     value: "baseline",
-    label: "Baseline",
-    description: "Single agent run with tool calling.",
+    label: "单代理",
+    description: "单个智能体直接执行，并按需调用工具。",
   },
   {
     value: "draft_verifier",
-    label: "Draft + Verifier",
-    description: "Speculative-style draft-verifier workflow.",
+    label: "草稿 + 校验",
+    description: "先生成草稿，再由校验模型审核或改写。",
   },
-] as const;
-
-const modelOptions = [
-  "Qwen/Qwen2-7B-Instruct",
-  "Qwen/Qwen2.5-7B-Instruct",
-  "deepseek-ai/DeepSeek-V3",
-  "gpt-5.4",
-  "gpt-5.4-mini",
-  "gpt-4.1",
-  "gpt-4.1-mini",
-  "gpt-4o-mini",
 ] as const;
 
 type Mode = "baseline" | "draft_verifier";
@@ -166,32 +162,75 @@ type FormState = {
   enabledTools: EnabledTool[];
 };
 
-const defaultFormState: FormState = {
-  agentName: "SpecAgent Baseline Demo",
-  mode: "baseline",
-  systemPrompt:
-    "You are an evaluation-ready product agent. Use deterministic tools carefully, explain tradeoffs clearly, and optimize for reliable benchmark performance.",
-  userPrompt:
-    "Recommend a laptop for frequent travel, light coding, and strong battery life. Stay under $1,400 and explain the tradeoffs.",
-  model: "deepseek-ai/DeepSeek-V3",
-  draftModel: "deepseek-ai/DeepSeek-V3",
-  verifierModel: "deepseek-ai/DeepSeek-V3",
-  enabledTools: ["productDb", "mockSearch", "calculator"],
-};
+function getAutoAgentName(mode: Mode) {
+  return mode === "baseline" ? "SpecAgent 单代理演示" : "SpecAgent 草稿校验演示";
+}
 
-const compactCurrency = new Intl.NumberFormat("en-US", {
+function buildDefaultFormState(provider: AiProvider): FormState {
+  const defaults = getDefaultModelsForProvider(provider);
+
+  return {
+    agentName: getAutoAgentName("baseline"),
+    mode: "baseline",
+    systemPrompt:
+      "你是一个用于评测的产品智能体。请谨慎使用确定性工具，清楚解释取舍，并优先保证结果稳定可靠。",
+    userPrompt:
+      "请推荐一台适合频繁出差、轻度编程、续航优先的笔记本电脑，总预算控制在 1400 美元以内，并说明取舍。",
+    model: defaults.baseline,
+    draftModel: defaults.draft,
+    verifierModel: defaults.verifier,
+    enabledTools: ["productDb", "mockSearch", "calculator"],
+  };
+}
+
+function normalizeFormState(formState: FormState, provider: AiProvider): FormState {
+  const defaults = getDefaultModelsForProvider(provider);
+
+  return {
+    ...formState,
+    model: isKnownModelCompatibleWithProvider(formState.model, provider)
+      ? formState.model
+      : defaults.baseline,
+    draftModel: isKnownModelCompatibleWithProvider(formState.draftModel, provider)
+      ? formState.draftModel
+      : defaults.draft,
+    verifierModel: isKnownModelCompatibleWithProvider(
+      formState.verifierModel,
+      provider,
+    )
+      ? formState.verifierModel
+      : defaults.verifier,
+  };
+}
+
+const compactCurrency = new Intl.NumberFormat("zh-CN", {
   style: "currency",
   currency: "USD",
   minimumFractionDigits: 3,
   maximumFractionDigits: 3,
 });
 
-export function AgentPlayground() {
-  const [formState, setFormState] = useState<FormState>(defaultFormState);
+type AgentPlaygroundProps = {
+  defaultProvider: AiProvider;
+};
+
+export function AgentPlayground({ defaultProvider }: AgentPlaygroundProps) {
+  const [rawFormState, setFormState] = useState<FormState>(() =>
+    buildDefaultFormState(defaultProvider),
+  );
   const [runResult, setRunResult] = useState<PlaygroundRunResponse | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const { providerConfig, isConfigured, isReady } = useLocalApiConfig();
+  const activeProvider = providerConfig?.provider ?? defaultProvider;
+  const availableModels = useMemo(
+    () => getModelOptionsForProvider(activeProvider),
+    [activeProvider],
+  );
+  const formState = useMemo(
+    () => normalizeFormState(rawFormState, activeProvider),
+    [rawFormState, activeProvider],
+  );
 
   const selectedToolCount = formState.enabledTools.length;
 
@@ -224,7 +263,8 @@ export function AgentPlayground() {
           mode: formState.mode,
           systemPrompt: formState.systemPrompt,
           userPrompt: formState.userPrompt,
-          model: formState.model,
+          model:
+            formState.mode === "baseline" ? formState.model : formState.draftModel,
           draftModel:
             formState.mode === "draft_verifier" ? formState.draftModel : undefined,
           verifierModel:
@@ -244,13 +284,17 @@ export function AgentPlayground() {
       if (!response.ok) {
         setRunResult(payload);
         const suffix = payload.code ? ` [${payload.code}]` : "";
-        setErrorMessage(`${payload.error ?? "Unable to run agent."}${suffix}`);
+        const detail =
+          payload.result?.error && payload.result.error !== payload.error
+            ? ` ${payload.result.error}`
+            : "";
+        setErrorMessage(`${payload.error ?? "无法运行当前智能体。"}${detail}${suffix}`);
         return;
       }
 
       setRunResult(payload);
     } catch {
-      setErrorMessage("Network error while calling the agent run API.");
+      setErrorMessage("调用 Playground API 时发生网络错误。");
     } finally {
       setIsSubmitting(false);
     }
@@ -259,16 +303,16 @@ export function AgentPlayground() {
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
-        eyebrow="Playground"
-        title="Configure, run, and inspect agent behavior."
-        description="Run a baseline agent or a speculative-style draft-verifier workflow, then inspect latency, cost, tool traces, and verifier decisions in one place."
+        eyebrow="调试台"
+        title="配置、运行并检查一次智能体执行。"
+        description="可以在这里运行单代理模式或草稿校验模式，并在同一处查看时延、成本、工具调用轨迹和校验结论。"
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant="outline" className="rounded-md border-primary/25 bg-primary/5 px-2.5 py-1 text-primary">
-              Deterministic tools
+              确定性工具链
             </Badge>
             <Badge variant="outline" className="rounded-md px-2.5 py-1">
-              Portfolio demo ready
+              支持部署演示
             </Badge>
           </div>
         }
@@ -279,14 +323,14 @@ export function AgentPlayground() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Bot className="size-4 text-primary" aria-hidden="true" />
-              Agent Setup
+              智能体配置
             </CardTitle>
-            <CardDescription>Configure the run shape, prompt pair, and available tool surface.</CardDescription>
+            <CardDescription>设置运行模式、提示词以及本次可用的工具范围。</CardDescription>
           </CardHeader>
           <CardContent>
             <form className="grid gap-5" onSubmit={handleSubmit}>
               <div className="grid gap-2">
-                <Label htmlFor="agent-name">Agent name</Label>
+                <Label htmlFor="agent-name">智能体名称</Label>
                 <Input
                   id="agent-name"
                   value={formState.agentName}
@@ -296,27 +340,24 @@ export function AgentPlayground() {
                       agentName: event.target.value,
                     }))
                   }
-                  placeholder="SpecAgent Recommender"
+                  placeholder="例如：SpecAgent 推荐助手"
                 />
               </div>
 
               <div className="grid gap-2">
-                <Label htmlFor="agent-mode">Mode</Label>
+                <Label htmlFor="agent-mode">运行模式</Label>
                 <Select
                   value={formState.mode}
                   onValueChange={(value: Mode) =>
                     setFormState((current) => ({
                       ...current,
                       mode: value,
-                      agentName:
-                        value === "baseline"
-                          ? "SpecAgent Baseline Demo"
-                          : "SpecAgent Draft-Verifier Demo",
+                      agentName: getAutoAgentName(value),
                     }))
                   }
                 >
                   <SelectTrigger id="agent-mode" className="w-full">
-                    <SelectValue placeholder="Choose mode" />
+                    <SelectValue placeholder="选择模式" />
                   </SelectTrigger>
                   <SelectContent>
                     {modeOptions.map((mode) => (
@@ -332,7 +373,7 @@ export function AgentPlayground() {
               </div>
 
               <div className="grid gap-2">
-                <Label htmlFor="system-prompt">System prompt</Label>
+                <Label htmlFor="system-prompt">系统提示词</Label>
                 <Textarea
                   id="system-prompt"
                   className="min-h-40"
@@ -347,7 +388,7 @@ export function AgentPlayground() {
               </div>
 
               <div className="grid gap-2">
-                <Label htmlFor="user-prompt">User prompt</Label>
+                <Label htmlFor="user-prompt">用户提示词</Label>
                 <Textarea
                   id="user-prompt"
                   className="min-h-32"
@@ -362,33 +403,31 @@ export function AgentPlayground() {
               </div>
 
               <div className="grid gap-4 md:grid-cols-2">
-                <div className="grid gap-2">
-                  <Label htmlFor="primary-model">
-                    {formState.mode === "baseline" ? "Model" : "Fallback model"}
-                  </Label>
-                  <Select
-                    value={formState.model}
-                    onValueChange={(value) =>
-                      setFormState((current) => ({ ...current, model: value }))
-                    }
-                  >
-                    <SelectTrigger id="primary-model" className="w-full">
-                      <SelectValue placeholder="Choose model" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {modelOptions.map((model) => (
-                        <SelectItem key={model} value={model}>
-                          {model}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {formState.mode === "draft_verifier" ? (
+                {formState.mode === "baseline" ? (
+                  <div className="grid gap-2 md:col-span-2">
+                    <Label htmlFor="primary-model">执行模型</Label>
+                    <Select
+                      value={formState.model}
+                      onValueChange={(value) =>
+                        setFormState((current) => ({ ...current, model: value }))
+                      }
+                    >
+                      <SelectTrigger id="primary-model" className="w-full">
+                        <SelectValue placeholder="选择模型" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {availableModels.map((model) => (
+                          <SelectItem key={model} value={model}>
+                            {model}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                ) : (
                   <>
                     <div className="grid gap-2">
-                      <Label htmlFor="draft-model">Draft model</Label>
+                      <Label htmlFor="draft-model">草稿模型</Label>
                       <Select
                         value={formState.draftModel}
                         onValueChange={(value) =>
@@ -396,10 +435,10 @@ export function AgentPlayground() {
                         }
                       >
                         <SelectTrigger id="draft-model" className="w-full">
-                          <SelectValue placeholder="Choose draft model" />
+                          <SelectValue placeholder="选择草稿模型" />
                         </SelectTrigger>
                         <SelectContent>
-                          {modelOptions.map((model) => (
+                          {availableModels.map((model) => (
                             <SelectItem key={model} value={model}>
                               {model}
                             </SelectItem>
@@ -408,7 +447,7 @@ export function AgentPlayground() {
                       </Select>
                     </div>
                     <div className="grid gap-2 md:col-span-2">
-                      <Label htmlFor="verifier-model">Verifier model</Label>
+                      <Label htmlFor="verifier-model">校验模型</Label>
                       <Select
                         value={formState.verifierModel}
                         onValueChange={(value) =>
@@ -419,10 +458,10 @@ export function AgentPlayground() {
                         }
                       >
                         <SelectTrigger id="verifier-model" className="w-full">
-                          <SelectValue placeholder="Choose verifier model" />
+                          <SelectValue placeholder="选择校验模型" />
                         </SelectTrigger>
                         <SelectContent>
-                          {modelOptions.map((model) => (
+                          {availableModels.map((model) => (
                             <SelectItem key={model} value={model}>
                               {model}
                             </SelectItem>
@@ -431,14 +470,14 @@ export function AgentPlayground() {
                       </Select>
                     </div>
                   </>
-                ) : null}
+                )}
               </div>
 
               <div className="grid gap-3">
                 <div className="flex items-center justify-between gap-3">
-                  <Label>Enabled tools</Label>
+                  <Label>启用工具</Label>
                   <Badge variant="secondary" className="rounded-md px-2.5 py-1">
-                    {selectedToolCount} selected
+                    已选 {selectedToolCount} 个
                   </Badge>
                 </div>
                 <div className="grid gap-3">
@@ -470,7 +509,7 @@ export function AgentPlayground() {
                             variant={isSelected ? "default" : "outline"}
                             className="rounded-md px-2 py-0.5"
                           >
-                            {isSelected ? "On" : "Off"}
+                            {isSelected ? "启用" : "关闭"}
                           </Badge>
                         </div>
                         <p className="text-sm leading-6 text-muted-foreground">
@@ -485,11 +524,11 @@ export function AgentPlayground() {
               <div className="grid gap-3 rounded-lg border border-border bg-muted/30 p-4">
                 <div className="flex items-center justify-between gap-3">
                   <div>
-                    <div className="text-sm font-medium text-foreground">Run profile</div>
+                    <div className="text-sm font-medium text-foreground">运行画像</div>
                     <p className="text-sm text-muted-foreground">
                       {formState.mode === "baseline"
-                        ? "Single pass with deterministic tool traces."
-                        : "Fast draft reviewed by a stronger verifier."}
+                        ? `使用 ${getProviderLabel(activeProvider)} 兼容模型完成单次执行，并保留确定性工具轨迹。`
+                        : `使用 ${getProviderLabel(activeProvider)} 兼容模型生成草稿，再由校验模型审核或重写。`}
                     </p>
                   </div>
                   <div className="flex size-10 items-center justify-center rounded-lg border border-primary/20 bg-primary/8 text-primary">
@@ -504,12 +543,12 @@ export function AgentPlayground() {
                   {isSubmitting ? (
                     <>
                       <Activity className="size-4 animate-spin" aria-hidden="true" />
-                      Running agent
+                      正在运行
                     </>
                   ) : (
                     <>
                       <Zap className="size-4" aria-hidden="true" />
-                      Run Agent
+                      运行智能体
                     </>
                   )}
                 </Button>
@@ -522,7 +561,7 @@ export function AgentPlayground() {
       {errorMessage ? (
         <Alert variant="destructive">
           <TriangleAlert className="size-4" aria-hidden="true" />
-          <AlertTitle>Run failed</AlertTitle>
+          <AlertTitle>运行失败</AlertTitle>
           <AlertDescription>{errorMessage}</AlertDescription>
         </Alert>
       ) : null}
@@ -531,12 +570,12 @@ export function AgentPlayground() {
         <Alert>
           <Sparkles className="size-4" aria-hidden="true" />
           <AlertTitle>
-            {isConfigured ? "Using browser API configuration" : "No browser API configuration found"}
+            {isConfigured ? "已检测到浏览器侧 API 配置" : "未检测到浏览器侧 API 配置"}
           </AlertTitle>
           <AlertDescription>
             {isConfigured
-              ? `This run will use your locally saved ${providerConfig?.provider} credentials from the homepage.`
-              : "Add an API key on the homepage first so playground runs can execute without relying on server environment variables."}
+              ? `本次会优先使用首页中保存的 ${getProviderLabel(providerConfig?.provider ?? defaultProvider)} 本地凭证。`
+              : `当前会回退使用部署环境中的 ${getProviderLabel(defaultProvider)} 配置。若未在服务端配置密钥，请先回首页填写本地 API 配置。`}
           </AlertDescription>
         </Alert>
       ) : null}
@@ -544,9 +583,9 @@ export function AgentPlayground() {
       {runResult && !runResult.persisted ? (
         <Alert>
           <TriangleAlert className="size-4" aria-hidden="true" />
-          <AlertTitle>Transient run</AlertTitle>
+          <AlertTitle>未持久化运行</AlertTitle>
           <AlertDescription>
-            This run completed successfully without a configured database, so it is shown in the playground only and not saved to <span className="font-mono">/runs/[id]</span>.
+            当前数据库尚未配置，这次运行仅会显示在调试台里，不会保存到 <span className="font-mono">/runs/[id]</span>。
           </AlertDescription>
         </Alert>
       ) : null}
@@ -554,33 +593,33 @@ export function AgentPlayground() {
           <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             <MetricCard
               icon={Clock3}
-              label="Latency"
+              label="时延"
               value={runResult ? formatMs(runResult.latency) : "—"}
-              hint="End-to-end runtime"
+              hint="端到端耗时"
             />
             <MetricCard
               icon={CircleDollarSign}
-              label="Estimated Cost"
+              label="预估成本"
               value={runResult ? compactCurrency.format(runResult.cost) : "—"}
-              hint="Token-based estimate"
+              hint="按 Token 粗略估算"
             />
             <MetricCard
               icon={Wrench}
-              label="Tool Calls"
+              label="工具调用"
               value={runResult ? String(runResult.toolCalls.length) : "—"}
-              hint="Execution trace volume"
+              hint="本次轨迹中的调用次数"
             />
             <MetricCard
               icon={CheckCircle2}
-              label="Draft Accepted"
+              label="草稿是否接受"
               value={
                 runResult?.draftAccepted === null
-                  ? "N/A"
+                  ? "不适用"
                   : runResult?.draftAccepted
-                    ? "Accepted"
-                    : "Rejected"
+                    ? "已接受"
+                    : "已拒绝"
               }
-              hint="Verifier decision surface"
+              hint="校验器最终判断"
             />
           </section>
 
@@ -588,10 +627,10 @@ export function AgentPlayground() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Brain className="size-4 text-primary" aria-hidden="true" />
-                Run Result
+                运行结果
               </CardTitle>
               <CardDescription>
-                Final answer, trace details, and workflow-level metrics for the latest playground run.
+                查看最近一次 Playground 运行的最终回答、轨迹细节与流程级指标。
               </CardDescription>
             </CardHeader>
             <CardContent className="grid gap-5">
@@ -603,9 +642,9 @@ export function AgentPlayground() {
                     <Bot className="size-5" aria-hidden="true" />
                   </div>
                   <div className="space-y-2">
-                    <h2 className="text-lg font-medium">Ready for the first run</h2>
+                    <h2 className="text-lg font-medium">准备开始第一次运行</h2>
                     <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
-                      Configure the prompts and model stack, then run the agent to inspect answer quality, tool usage, and draft-verifier behavior.
+                      先设置提示词和模型，再运行一次，就能检查回答质量、工具使用情况以及草稿校验链路的表现。
                     </p>
                   </div>
                 </div>
@@ -614,27 +653,27 @@ export function AgentPlayground() {
               {runResult ? (
                 <Tabs defaultValue="answer" className="gap-4">
                   <TabsList variant="line">
-                    <TabsTrigger value="answer">Answer</TabsTrigger>
-                    <TabsTrigger value="timeline">Timeline</TabsTrigger>
-                    <TabsTrigger value="tools">Tool Calls</TabsTrigger>
+                    <TabsTrigger value="answer">回答</TabsTrigger>
+                    <TabsTrigger value="timeline">时间线</TabsTrigger>
+                    <TabsTrigger value="tools">工具调用</TabsTrigger>
                   </TabsList>
 
                   <TabsContent value="answer" className="grid gap-5">
                     <Card size="sm" className="bg-muted/20">
                       <CardHeader>
-                        <CardTitle className="text-sm">Final answer</CardTitle>
-                        <CardDescription>Returned to the playground caller.</CardDescription>
+                        <CardTitle className="text-sm">最终回答</CardTitle>
+                        <CardDescription>返回给 Playground 调用方的结果。</CardDescription>
                       </CardHeader>
                       <CardContent className="space-y-4">
                         <div className="rounded-lg border border-border bg-background p-4 text-sm leading-7 text-foreground whitespace-pre-wrap">
-                          {runResult.output || "No output returned."}
+                          {runResult.output || "本次没有返回任何输出。"}
                         </div>
 
                         {"workflow" in runResult.result ? (
                           <div className="grid gap-4 md:grid-cols-2">
                             <div className="rounded-lg border border-border bg-background p-4">
                               <div className="flex items-center justify-between gap-3">
-                                <span className="text-sm font-medium">Draft review</span>
+                                <span className="text-sm font-medium">草稿评审</span>
                                 <Badge
                                   variant={
                                     runResult.result.metrics.draftAccepted
@@ -644,8 +683,8 @@ export function AgentPlayground() {
                                   className="rounded-md px-2 py-0.5"
                                 >
                                   {runResult.result.metrics.draftAccepted
-                                    ? "Accepted"
-                                    : runResult.result.verifier.decision}
+                                    ? "已接受"
+                                    : formatVerifierDecision(runResult.result.verifier.decision)}
                                 </Badge>
                               </div>
                               <p className="mt-3 text-sm leading-6 text-muted-foreground">
@@ -653,7 +692,7 @@ export function AgentPlayground() {
                               </p>
                             </div>
                             <div className="rounded-lg border border-border bg-background p-4">
-                              <div className="text-sm font-medium">Verifier confidence</div>
+                              <div className="text-sm font-medium">校验置信度</div>
                               <div className="mt-3 space-y-2">
                                 <Progress value={runResult.result.verifier.confidenceScore * 100} />
                                 <div className="text-sm text-muted-foreground">
@@ -683,13 +722,13 @@ export function AgentPlayground() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Activity className="size-4 text-primary" aria-hidden="true" />
-                Runtime health
+                运行健康度
               </CardTitle>
-              <CardDescription>Quick read on trace stability for the current run.</CardDescription>
+              <CardDescription>快速查看本次运行的轨迹稳定性与工具表现。</CardDescription>
             </CardHeader>
             <CardContent className="grid gap-3">
               <div className="flex items-center justify-between gap-3 text-sm">
-                <span className="text-muted-foreground">Tool success rate</span>
+                <span className="text-muted-foreground">工具成功率</span>
                 <span className="font-medium">{toolHealth}%</span>
               </div>
               <Progress value={toolHealth} />
@@ -761,7 +800,7 @@ function ToolCallPanel({ toolCalls }: { toolCalls: ToolCallRecord[] }) {
   if (toolCalls.length === 0) {
     return (
       <div className="rounded-lg border border-dashed border-border bg-muted/20 p-6 text-sm text-muted-foreground">
-        No tool calls were needed for this run.
+        这次运行没有触发任何工具调用。
       </div>
     );
   }
@@ -776,14 +815,14 @@ function ToolCallPanel({ toolCalls }: { toolCalls: ToolCallRecord[] }) {
                 <Badge variant="outline" className="rounded-md px-2 py-0.5 font-mono">
                   {toolCall.toolName}
                 </Badge>
-                <span className="text-sm text-muted-foreground">Call {index + 1}</span>
+                <span className="text-sm text-muted-foreground">第 {index + 1} 次调用</span>
               </div>
               <div className="flex items-center gap-2">
                 <Badge
                   variant={toolCall.success ? "secondary" : "destructive"}
                   className="rounded-md px-2 py-0.5"
                 >
-                  {toolCall.success ? "Success" : "Failed"}
+                  {toolCall.success ? "成功" : "失败"}
                 </Badge>
                 <span className="text-sm text-muted-foreground">
                   {formatMs(toolCall.latencyMs)}
@@ -791,9 +830,9 @@ function ToolCallPanel({ toolCalls }: { toolCalls: ToolCallRecord[] }) {
               </div>
             </div>
             <div className="grid gap-3 md:grid-cols-2">
-              <JsonPanel label="Input" value={toolCall.input} />
+              <JsonPanel label="输入" value={toolCall.input} />
               <JsonPanel
-                label={toolCall.success ? "Output" : "Error"}
+                label={toolCall.success ? "输出" : "错误"}
                 value={toolCall.success ? toolCall.output : toolCall.error}
               />
             </div>
@@ -809,22 +848,22 @@ function RunTimeline({ runResult }: { runResult: PlaygroundRunResponse }) {
     "workflow" in runResult.result
       ? [
           {
-            title: "Draft step",
+            title: "草稿阶段",
             badge: runResult.result.draftModel,
             tone: "default" as const,
             body: runResult.result.draft.draftAnswer,
-            meta: `${formatMs(runResult.result.draft.latencyMs)} · ${runResult.result.draft.expectedToolCalls.length} expected tools`,
+            meta: `${formatMs(runResult.result.draft.latencyMs)} · 预计 ${runResult.result.draft.expectedToolCalls.length} 个工具调用`,
           },
           ...runResult.toolCalls.map((toolCall) => ({
-            title: `Tool call · ${toolCall.toolName}`,
-            badge: toolCall.success ? "Succeeded" : "Failed",
+            title: `工具调用 · ${toolCall.toolName}`,
+            badge: toolCall.success ? "成功" : "失败",
             tone: toolCall.success ? ("default" as const) : ("destructive" as const),
             body: JSON.stringify(toolCall.input, null, 2),
-            meta: `${formatMs(toolCall.latencyMs)} · step ${toolCall.stepNumber ?? "n/a"}`,
+            meta: `${formatMs(toolCall.latencyMs)} · 步骤 ${toolCall.stepNumber ?? "未记录"}`,
           })),
           {
-            title: "Verifier step",
-            badge: runResult.result.verifier.decision,
+            title: "校验阶段",
+            badge: formatVerifierDecision(runResult.result.verifier.decision),
             tone:
               runResult.result.verifier.decision === "accept"
                 ? ("secondary" as const)
@@ -834,30 +873,30 @@ function RunTimeline({ runResult }: { runResult: PlaygroundRunResponse }) {
             body: runResult.result.verifier.reason,
             meta: `${formatMs(runResult.result.verifier.latencyMs)} · ${Math.round(
               runResult.result.verifier.confidenceScore * 100,
-            )}% confidence`,
+            )}% 置信度`,
           },
           {
-            title: "Final answer",
-            badge: "Returned",
+            title: "最终回答",
+            badge: "已返回",
             tone: "secondary" as const,
             body: runResult.output,
-            meta: `${formatMs(runResult.latency)} total`,
+            meta: `总耗时 ${formatMs(runResult.latency)}`,
           },
         ]
       : [
           {
-            title: "Baseline step",
+            title: "单代理执行",
             badge: runResult.result.model,
             tone: "default" as const,
             body: runResult.output,
-            meta: `${formatMs(runResult.latency)} total`,
+            meta: `总耗时 ${formatMs(runResult.latency)}`,
           },
           ...runResult.toolCalls.map((toolCall) => ({
-            title: `Tool call · ${toolCall.toolName}`,
-            badge: toolCall.success ? "Succeeded" : "Failed",
+            title: `工具调用 · ${toolCall.toolName}`,
+            badge: toolCall.success ? "成功" : "失败",
             tone: toolCall.success ? ("default" as const) : ("destructive" as const),
             body: JSON.stringify(toolCall.input, null, 2),
-            meta: `${formatMs(toolCall.latencyMs)} · step ${toolCall.stepNumber ?? "n/a"}`,
+            meta: `${formatMs(toolCall.latencyMs)} · 步骤 ${toolCall.stepNumber ?? "未记录"}`,
           })),
         ];
 
@@ -906,5 +945,17 @@ function JsonPanel({ label, value }: { label: string; value: unknown }) {
 }
 
 function formatMs(value: number) {
-  return `${value.toLocaleString()} ms`;
+  return `${value.toLocaleString("zh-CN")} ms`;
+}
+
+function formatVerifierDecision(decision: DraftVerifierRunResult["verifier"]["decision"]) {
+  if (decision === "accept") {
+    return "接受";
+  }
+
+  if (decision === "revise") {
+    return "改写";
+  }
+
+  return "拒绝";
 }

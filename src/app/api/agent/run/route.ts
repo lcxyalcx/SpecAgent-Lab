@@ -20,6 +20,11 @@ import {
   sanitizeApiProviderConfig,
 } from "@/lib/ai/config";
 import {
+  getModelOptionsForProvider,
+  getProviderLabel,
+  isKnownModelCompatibleWithProvider,
+} from "@/lib/ai/catalog";
+import {
   getAiProvider,
   hasAiProviderCredentials,
 } from "@/lib/ai/provider";
@@ -73,7 +78,7 @@ export async function POST(request: Request) {
   } catch {
     return NextResponse.json(
       {
-        error: "Invalid JSON request body.",
+        error: "请求体不是合法的 JSON。",
       },
       { status: 400 },
     );
@@ -84,7 +89,7 @@ export async function POST(request: Request) {
   if (!parsedRequest.success) {
     return NextResponse.json(
       {
-        error: "Invalid agent run request.",
+        error: "运行请求参数不完整或格式不正确。",
         details: parsedRequest.error.flatten(),
       },
       { status: 400 },
@@ -94,13 +99,24 @@ export async function POST(request: Request) {
   const input = parsedRequest.data;
   const provider = getAiProvider(input.providerConfig);
 
+  const modelCompatibilityError = getModelCompatibilityError(input, provider);
+  if (modelCompatibilityError) {
+    return NextResponse.json(
+      {
+        error: modelCompatibilityError,
+        code: "MODEL_PROVIDER_MISMATCH",
+      },
+      { status: 400 },
+    );
+  }
+
   if (!hasAiProviderCredentials(input.providerConfig)) {
     return NextResponse.json(
       {
         error:
           provider === "siliconflow"
-            ? "SILICONFLOW_API_KEY is not set. Add it in environment variables or save it from the homepage API configuration card."
-            : "OPENAI_API_KEY is not set. Add it in environment variables or save it from the homepage API configuration card.",
+            ? "当前未配置 SILICONFLOW_API_KEY。请在部署环境变量中填写，或先在首页保存浏览器侧 API 配置。"
+            : "当前未配置 OPENAI_API_KEY。请在部署环境变量中填写，或先在首页保存浏览器侧 API 配置。",
         code:
           provider === "siliconflow"
             ? "SILICONFLOW_NOT_CONFIGURED"
@@ -232,7 +248,7 @@ export async function POST(request: Request) {
       return NextResponse.json(
         {
           ...responseBody,
-          error: "Agent run failed.",
+          error: runResult.error ?? "智能体运行失败。",
         },
         { status: 500 },
       );
@@ -247,7 +263,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json(
       {
-        error: "Unable to run agent request.",
+        error: "无法执行当前 Playground 请求。",
       },
       { status: 500 },
     );
@@ -319,4 +335,32 @@ function buildRunSummary(
 
 function toJsonValue(value: unknown): Prisma.InputJsonValue {
   return JSON.parse(JSON.stringify(value ?? null)) as Prisma.InputJsonValue;
+}
+
+function getModelCompatibilityError(
+  input: z.infer<typeof agentRunRequestSchema>,
+  provider: "openai" | "siliconflow",
+) {
+  const checks =
+    input.mode === "baseline"
+      ? [{ field: "执行模型", value: input.model }]
+      : [
+          { field: "草稿模型", value: input.draftModel ?? "" },
+          { field: "校验模型", value: input.verifierModel ?? "" },
+        ];
+
+  const mismatch = checks.find(
+    (entry) =>
+      entry.value &&
+      !isKnownModelCompatibleWithProvider(entry.value, provider),
+  );
+
+  if (!mismatch) {
+    return null;
+  }
+
+  return [
+    `当前 API 供应商是 ${getProviderLabel(provider)}，但所选${mismatch.field}“${mismatch.value}”不在兼容列表中。`,
+    `请改用 ${getModelOptionsForProvider(provider).join(" / ")}，或切换到匹配的供应商后再运行。`,
+  ].join("");
 }

@@ -4,33 +4,13 @@ import {
   apiProviderConfigSchema,
   type ApiProviderConfigInput,
 } from "@/lib/ai/config";
-
-export type AiProvider = "openai" | "siliconflow";
+import {
+  type AiProvider,
+  getDefaultModelsForProvider,
+  getModelOptionsForProvider,
+} from "@/lib/ai/catalog";
 
 const SILICONFLOW_BASE_URL = "https://api.siliconflow.cn/v1";
-
-const DEFAULT_MODELS: Record<
-  AiProvider,
-  {
-    baseline: string;
-    draft: string;
-    verifier: string;
-    judge: string;
-  }
-> = {
-  openai: {
-    baseline: "gpt-5.4",
-    draft: "gpt-5.4-mini",
-    verifier: "gpt-5.4",
-    judge: "gpt-4o-mini",
-  },
-  siliconflow: {
-    baseline: "deepseek-ai/DeepSeek-V3",
-    draft: "deepseek-ai/DeepSeek-V3",
-    verifier: "deepseek-ai/DeepSeek-V3",
-    judge: "deepseek-ai/DeepSeek-V3",
-  },
-};
 
 function resolveProviderConfig(input?: ApiProviderConfigInput) {
   const parsed = apiProviderConfigSchema.safeParse(input);
@@ -74,20 +54,11 @@ export function hasAiProviderCredentials(input?: ApiProviderConfigInput): boolea
 }
 
 export function getDefaultAgentModels(input?: ApiProviderConfigInput) {
-  return DEFAULT_MODELS[getAiProvider(input)];
+  return getDefaultModelsForProvider(getAiProvider(input));
 }
 
-export function getModelOptions() {
-  return [
-    "Qwen/Qwen2-7B-Instruct",
-    "Qwen/Qwen2.5-7B-Instruct",
-    "deepseek-ai/DeepSeek-V3",
-    "gpt-5.4",
-    "gpt-5.4-mini",
-    "gpt-4.1",
-    "gpt-4.1-mini",
-    "gpt-4o-mini",
-  ] as const;
+export function getModelOptions(input?: ApiProviderConfigInput) {
+  return getModelOptionsForProvider(getAiProvider(input));
 }
 
 export function getLanguageModel(modelId: string, input?: ApiProviderConfigInput) {

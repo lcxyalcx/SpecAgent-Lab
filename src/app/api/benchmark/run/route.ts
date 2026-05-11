@@ -28,7 +28,7 @@ export async function POST(request: Request) {
   } catch {
     return NextResponse.json(
       {
-        error: "Invalid JSON request body.",
+        error: "请求体不是合法的 JSON。",
       },
       { status: 400 },
     );
@@ -39,7 +39,7 @@ export async function POST(request: Request) {
   if (!parsedRequest.success) {
     return NextResponse.json(
       {
-        error: "Invalid benchmark request.",
+        error: "Benchmark 请求参数不完整或格式不正确。",
         details: parsedRequest.error.flatten(),
       },
       { status: 400 },
@@ -54,7 +54,7 @@ export async function POST(request: Request) {
   if (invalidTaskIds.length > 0) {
     return NextResponse.json(
       {
-        error: "Unknown benchmark task id.",
+        error: "存在无法识别的 Benchmark 任务 ID。",
         invalidTaskIds,
       },
       { status: 400 },
@@ -66,8 +66,8 @@ export async function POST(request: Request) {
       {
         error:
           provider === "siliconflow"
-            ? "SILICONFLOW_API_KEY is not set. Add it in environment variables or save it from the homepage API configuration card."
-            : "OPENAI_API_KEY is not set. Add it in environment variables or save it from the homepage API configuration card.",
+            ? "当前未配置 SILICONFLOW_API_KEY。请在部署环境变量中填写，或先在首页保存浏览器侧 API 配置。"
+            : "当前未配置 OPENAI_API_KEY。请在部署环境变量中填写，或先在首页保存浏览器侧 API 配置。",
         code:
           provider === "siliconflow"
             ? "SILICONFLOW_NOT_CONFIGURED"
@@ -94,7 +94,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json(
       {
-        error: "Unable to run benchmark request.",
+        error: "无法启动当前 Benchmark 运行。",
       },
       { status: 500 },
     );

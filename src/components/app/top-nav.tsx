@@ -9,10 +9,10 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 const navItems = [
-  { href: "/", label: "Overview" },
-  { href: "/playground", label: "Playground" },
-  { href: "/benchmark", label: "Benchmark" },
-  { href: "/dashboard", label: "Dashboard" },
+  { href: "/", label: "总览" },
+  { href: "/playground", label: "调试台" },
+  { href: "/benchmark", label: "基准测试" },
+  { href: "/dashboard", label: "仪表盘" },
 ];
 
 export function TopNav() {
@@ -30,7 +30,7 @@ export function TopNav() {
               SpecAgent Lab
             </Link>
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <span>Agent evaluation scaffold</span>
+              <span>智能体评测工作台</span>
               <Badge variant="outline" className="rounded-md px-1.5 py-0 text-[10px]">
                 MVP
               </Badge>
@@ -61,13 +61,13 @@ export function TopNav() {
           <Button asChild variant="outline" size="sm" className="hidden sm:inline-flex">
             <Link href="/runs/demo-run">
               <Beaker className="size-4" aria-hidden="true" />
-              Latest run
+              最近运行
             </Link>
           </Button>
           <Button asChild size="sm">
             <Link href="/dashboard">
               <BarChart3 className="size-4" aria-hidden="true" />
-              Open dashboard
+              打开仪表盘
             </Link>
           </Button>
         </div>
@@ -93,7 +93,7 @@ export function TopNav() {
           <Button asChild variant={pathname.startsWith("/runs/") ? "secondary" : "ghost"} size="sm" className="shrink-0">
             <Link href="/runs/demo-run">
               <Bot className="size-4" aria-hidden="true" />
-              Run
+              运行记录
             </Link>
           </Button>
         </div>

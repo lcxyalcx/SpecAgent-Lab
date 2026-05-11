@@ -65,6 +65,7 @@ export type BenchmarkRunRow = {
   toolErrorCount: number;
   draftAccepted: boolean | null;
   verifierReason: string | null;
+  error: string | null;
 };
 
 export type BenchmarkAggregateRow = {
@@ -267,6 +268,7 @@ export async function runBenchmark(
         verifierReason: isDraftVerifierRunResult(runResult)
           ? runResult.verifier.reason
           : null,
+        error: runResult.error,
       });
     }
   }

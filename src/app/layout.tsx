@@ -18,9 +18,9 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   metadataBase: new URL(getPublicAppUrl()),
-  title: "SpecAgent Lab",
+  title: "SpecAgent Lab | 智能体评测工作台",
   description:
-    "SpecAgent Lab for configuring agents, running benchmarks, and reviewing evaluation runs.",
+    "用于配置智能体、运行基准测试并查看评测结果的 SpecAgent Lab 工作台。",
 };
 
 export default function RootLayout({
@@ -29,7 +29,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={`${geistSans.variable} ${geistMono.variable} h-full`}>
+    <html lang="zh-CN" className={`${geistSans.variable} ${geistMono.variable} h-full`}>
       <body className="min-h-full bg-background text-foreground antialiased">
         <div className="min-h-screen">
           <TopNav />
