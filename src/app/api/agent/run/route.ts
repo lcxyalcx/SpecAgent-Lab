@@ -28,8 +28,22 @@ import {
   getAiProvider,
   hasAiProviderCredentials,
 } from "@/lib/ai/provider";
-import { getPrisma } from "@/lib/db";
-import { isDatabaseConfigured } from "@/lib/env";
+import {
+  formatDatabaseError,
+  getDatabaseState,
+  getPrisma,
+  resetDatabaseStateCache,
+  withDatabaseTimeout,
+} from "@/lib/db";
+import {
+  buildDatabaseState,
+  type DatabaseState,
+} from "@/lib/database-state";
+import { persistRunRecordToFile } from "@/lib/persistence/file-store";
+import {
+  buildStorageInfo,
+  type StorageInfo,
+} from "@/lib/persistence/state";
 
 const enabledToolSchema = z.enum([
   "calculator",
@@ -127,6 +141,11 @@ export async function POST(request: Request) {
   }
 
   try {
+    let databaseState = await getDatabaseState();
+    const runName =
+      input.mode === "baseline"
+        ? "试运行 · 单代理"
+        : "试运行 · 草稿 + 校验";
     const runResult =
       input.mode === "baseline"
         ? await runBaselineAgent({
@@ -147,14 +166,135 @@ export async function POST(request: Request) {
 
     let runId = createTransientRunId();
     let persisted = false;
+    let storage = buildStorageInfo(
+      "none",
+      databaseState.message ?? "当前结果尚未保存。",
+    );
 
-    if (isDatabaseConfigured()) {
+    if (databaseState.available) {
       try {
         const prisma = getPrisma();
-        const agentConfig = await prisma.agentConfig.create({
-          data: {
-            name:
-              input.agentName,
+        const agentConfig = await withDatabaseTimeout(
+          prisma.agentConfig.create({
+            data: {
+              name: input.agentName,
+              mode:
+                input.mode === "baseline"
+                  ? AgentMode.BASELINE
+                  : AgentMode.DRAFT_VERIFIER,
+              model:
+                input.mode === "baseline"
+                  ? input.model
+                  : `${input.draftModel} -> ${input.verifierModel}`,
+              systemPrompt: input.systemPrompt,
+              enabledTools: toJsonValue(input.enabledTools),
+              toolConfig: toJsonValue({
+                source: "playground",
+                requestedMode: input.mode,
+                agentName: input.agentName,
+                providerConfig: sanitizeApiProviderConfig(input.providerConfig),
+              }),
+            },
+          }),
+        );
+
+        const persistedRun = await withDatabaseTimeout(
+          prisma.run.create({
+            data: {
+              name: runName,
+              agentConfigId: agentConfig.id,
+              status:
+                runResult.status === "succeeded"
+                  ? RunStatus.SUCCEEDED
+                  : RunStatus.FAILED,
+              input: toJsonValue({
+                mode: input.mode,
+                agentName: input.agentName,
+                systemPrompt: input.systemPrompt,
+                userPrompt: input.userPrompt,
+                model: input.model,
+                draftModel: input.draftModel ?? null,
+                verifierModel: input.verifierModel ?? null,
+                enabledTools: input.enabledTools,
+                providerConfig: sanitizeApiProviderConfig(input.providerConfig),
+              }),
+              output: toJsonValue(buildRunOutput(runResult)),
+              summary: toJsonValue(buildRunSummary(input.mode, runResult)),
+              metrics: toJsonValue(runResult.metrics),
+              startedAt: new Date(runResult.startedAt),
+              finishedAt: new Date(runResult.finishedAt),
+            },
+          }),
+        );
+
+        if (runResult.toolCalls.length > 0) {
+          await withDatabaseTimeout(
+            prisma.toolCall.createMany({
+              data: runResult.toolCalls.map((toolCall, index) => ({
+                runId: persistedRun.id,
+                toolName: toolCall.toolName,
+                sequence: index + 1,
+                status: toolCall.success
+                  ? ToolCallStatus.SUCCEEDED
+                  : ToolCallStatus.FAILED,
+                input: toJsonValue(toolCall.input),
+                output: toJsonValue(toolCall.output),
+                error: toJsonValue(
+                  toolCall.error
+                    ? {
+                        message: toolCall.error,
+                      }
+                    : null,
+                ),
+                latencyMs: toolCall.latencyMs,
+              })),
+            }),
+          );
+        }
+
+        runId = persistedRun.id;
+        persisted = true;
+        storage = buildStorageInfo("database");
+      } catch (error) {
+        resetDatabaseStateCache();
+        databaseState = buildDatabaseState(
+          "unavailable",
+          formatDatabaseError(error),
+        );
+        console.error("Playground persistence failed", {
+          mode: input.mode,
+          error: error instanceof Error ? error.message : "Unknown error",
+        });
+      }
+    }
+
+    if (!persisted) {
+      try {
+        const filePersistence = await persistRunRecordToFile({
+          id: runId,
+          name: runName,
+          status:
+            runResult.status === "succeeded"
+              ? RunStatus.SUCCEEDED
+              : RunStatus.FAILED,
+          input: {
+            mode: input.mode,
+            agentName: input.agentName,
+            systemPrompt: input.systemPrompt,
+            userPrompt: input.userPrompt,
+            model: input.model,
+            draftModel: input.draftModel ?? null,
+            verifierModel: input.verifierModel ?? null,
+            enabledTools: input.enabledTools,
+            providerConfig: sanitizeApiProviderConfig(input.providerConfig),
+          },
+          output: buildRunOutput(runResult),
+          summary: buildRunSummary(input.mode, runResult),
+          metrics: runResult.metrics,
+          startedAt: new Date(runResult.startedAt),
+          finishedAt: new Date(runResult.finishedAt),
+          agentConfig: {
+            name: input.agentName,
             mode:
               input.mode === "baseline"
                 ? AgentMode.BASELINE
@@ -164,73 +304,45 @@ export async function POST(request: Request) {
                 ? input.model
                 : `${input.draftModel} -> ${input.verifierModel}`,
             systemPrompt: input.systemPrompt,
-            enabledTools: toJsonValue(input.enabledTools),
-            toolConfig: toJsonValue({
+            enabledTools: input.enabledTools,
+            toolConfig: {
               source: "playground",
               requestedMode: input.mode,
               agentName: input.agentName,
               providerConfig: sanitizeApiProviderConfig(input.providerConfig),
-            }),
+            },
           },
+          toolCalls: runResult.toolCalls.map((toolCall, index) => ({
+            sequence: index + 1,
+            toolName: toolCall.toolName,
+            status: toolCall.success
+              ? ToolCallStatus.SUCCEEDED
+              : ToolCallStatus.FAILED,
+            input: toolCall.input,
+            output: toolCall.output,
+            error: toolCall.error
+              ? {
+                  message: toolCall.error,
+                }
+              : null,
+            latencyMs: toolCall.latencyMs,
+          })),
         });
-
-        const persistedRun = await prisma.run.create({
-          data: {
-            name:
-              input.mode === "baseline"
-                ? "试运行 · 单代理"
-                : "试运行 · 草稿 + 校验",
-            agentConfigId: agentConfig.id,
-            status:
-              runResult.status === "succeeded"
-                ? RunStatus.SUCCEEDED
-                : RunStatus.FAILED,
-            input: toJsonValue({
-              mode: input.mode,
-              agentName: input.agentName,
-              systemPrompt: input.systemPrompt,
-              userPrompt: input.userPrompt,
-              model: input.model,
-              draftModel: input.draftModel ?? null,
-              verifierModel: input.verifierModel ?? null,
-              enabledTools: input.enabledTools,
-              providerConfig: sanitizeApiProviderConfig(input.providerConfig),
-            }),
-            output: toJsonValue(buildRunOutput(runResult)),
-            summary: toJsonValue(buildRunSummary(input.mode, runResult)),
-            metrics: toJsonValue(runResult.metrics),
-            startedAt: new Date(runResult.startedAt),
-            finishedAt: new Date(runResult.finishedAt),
-          },
-        });
-
-        if (runResult.toolCalls.length > 0) {
-          await prisma.toolCall.createMany({
-            data: runResult.toolCalls.map((toolCall, index) => ({
-              runId: persistedRun.id,
-              toolName: toolCall.toolName,
-              sequence: index + 1,
-              status: toolCall.success
-                ? ToolCallStatus.SUCCEEDED
-                : ToolCallStatus.FAILED,
-              input: toJsonValue(toolCall.input),
-              output: toJsonValue(toolCall.output),
-              error: toJsonValue(
-                toolCall.error
-                  ? {
-                      message: toolCall.error,
-                    }
-                  : null,
-              ),
-              latencyMs: toolCall.latencyMs,
-            })),
-          });
-        }
-
-        runId = persistedRun.id;
+        runId = filePersistence.runId;
         persisted = true;
+        storage =
+          databaseState.message && databaseState.status !== "ready"
+            ? buildStorageInfo(
+                "file",
+                `${filePersistence.storage.message} 当前数据库状态：${databaseState.message}`,
+              )
+            : filePersistence.storage;
       } catch (error) {
-        console.error("Playground persistence failed", {
+        storage = buildStorageInfo(
+          "none",
+          "数据库和本地文件存储都未成功写入，这次结果刷新后可能丢失。",
+        );
+        console.error("Playground file persistence failed", {
           mode: input.mode,
           error: error instanceof Error ? error.message : "Unknown error",
         });
@@ -240,6 +352,8 @@ export async function POST(request: Request) {
     const responseBody = buildResponseBody(
       runId,
       persisted,
+      databaseState,
+      storage,
       input.mode,
       runResult,
     );
@@ -273,6 +387,8 @@ export async function POST(request: Request) {
 function buildResponseBody(
   runId: string,
   persisted: boolean,
+  persistence: DatabaseState,
+  storage: StorageInfo,
   mode: "baseline" | "draft_verifier",
   runResult: RunResult | DraftVerifierRunResult,
 ) {
@@ -284,6 +400,8 @@ function buildResponseBody(
   return {
     runId,
     persisted,
+    persistence,
+    storage,
     mode,
     status: runResult.status,
     output: runResult.outputText,

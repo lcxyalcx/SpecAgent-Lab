@@ -46,6 +46,7 @@ import {
 } from "@/lib/benchmark/tasks";
 import { useLocalApiConfig } from "@/hooks/use-local-api-config";
 import { getProviderLabel, type AiProvider } from "@/lib/ai/catalog";
+import type { StorageInfo } from "@/lib/persistence/state";
 import { cn } from "@/lib/utils";
 
 type BenchmarkMode = "baseline" | "draft_verifier";
@@ -53,6 +54,19 @@ type BenchmarkMode = "baseline" | "draft_verifier";
 type BenchmarkRunResponse = {
   benchmarkId: string;
   persisted: boolean;
+  persistence: {
+    status: "ready" | "not_configured" | "unavailable";
+    configured: boolean;
+    available: boolean;
+    message: string | null;
+  };
+  storage: StorageInfo;
+  modelProfile: {
+    baseline: string;
+    draft: string;
+    verifier: string;
+    judge: string;
+  };
   results: Array<{
     runId: string;
     persisted: boolean;
@@ -108,12 +122,12 @@ const modeCards = [
   {
     value: "baseline" as const,
     title: "单代理",
-    description: "由一个智能体直接完成整组任务。",
+    description: "由一个模型直接完成整组任务，作为质量与时延基线。",
   },
   {
     value: "draft_verifier" as const,
     title: "草稿 + 校验",
-    description: "先生成草稿，再由校验模型复核或改写。",
+    description: "先用更快的草稿模型起草，再由校验模型接受或改写；是否真的更快以下方实测为准。",
   },
 ];
 
@@ -199,6 +213,7 @@ export function BenchmarkRunner({ defaultProvider }: BenchmarkRunnerProps) {
 
   const summaryStats = buildSummaryStats(result);
   const failedRuns = result?.results.filter((row) => row.status === "failed") ?? [];
+  const headToHead = useMemo(() => buildHeadToHeadSummary(result), [result]);
 
   return (
     <div className="flex flex-col gap-8">
@@ -240,12 +255,26 @@ export function BenchmarkRunner({ defaultProvider }: BenchmarkRunnerProps) {
         </Alert>
       ) : null}
 
+      {result &&
+      result.persisted &&
+      (result.storage.target === "file" || result.storage.target === "mixed") ? (
+        <Alert>
+          <Sparkles className="size-4" aria-hidden="true" />
+          <AlertTitle>结果已保存到{result.storage.label}</AlertTitle>
+          <AlertDescription>{result.storage.message}</AlertDescription>
+        </Alert>
+      ) : null}
+
       {result && !result.persisted ? (
         <Alert>
           <TriangleAlert className="size-4" aria-hidden="true" />
           <AlertTitle>结果未持久化</AlertTitle>
           <AlertDescription>
-            当前数据库尚未配置，这次批量测试的结果只会显示在页面中，不会保存到 <span className="font-mono">/runs/[id]</span>。
+            {result.storage.message ??
+              (result.persistence.status === "not_configured"
+                ? "当前尚未配置 DATABASE_URL，这次批量测试的结果只会显示在页面中，不会保存到 /runs/[id]。"
+                : result.persistence.message ??
+                  "已检测到 DATABASE_URL，但当前无法连接数据库。这次批量测试的结果只会显示在页面中，不会保存到 /runs/[id]。")}
           </AlertDescription>
         </Alert>
       ) : null}
@@ -491,6 +520,25 @@ export function BenchmarkRunner({ defaultProvider }: BenchmarkRunnerProps) {
               </CardDescription>
             </CardHeader>
             <CardContent>
+              {result ? (
+                <div className="mb-4 grid gap-3 rounded-lg border border-border bg-muted/20 p-4 text-sm">
+                  <div className="font-medium">本次模型组合</div>
+                  <div className="text-muted-foreground">
+                    单代理：<span className="font-mono">{result.modelProfile.baseline}</span>
+                  </div>
+                  <div className="text-muted-foreground">
+                    草稿 + 校验：<span className="font-mono">{result.modelProfile.draft}</span>
+                    {" -> "}
+                    <span className="font-mono">{result.modelProfile.verifier}</span>
+                  </div>
+                  {headToHead ? (
+                    <div className="rounded-lg border border-primary/15 bg-background px-3 py-3 text-foreground">
+                      {headToHead}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+
               {isSubmitting && !result ? <AggregateLoading /> : null}
 
               {!isSubmitting && !result ? (
@@ -510,7 +558,12 @@ export function BenchmarkRunner({ defaultProvider }: BenchmarkRunnerProps) {
                             : "草稿 + 校验"}
                         </CardTitle>
                         <CardDescription>
-                          {aggregate.runCount} 次{result.persisted ? "已持久化" : "临时"}运行
+                          {aggregate.runCount} 次
+                          {result.persisted
+                            ? result.storage.target === "database"
+                              ? "已保存"
+                              : `已回退到${result.storage.label}`
+                            : "临时"}运行
                         </CardDescription>
                       </CardHeader>
                       <CardContent className="grid gap-3 text-sm">
@@ -573,8 +626,10 @@ export function BenchmarkRunner({ defaultProvider }: BenchmarkRunnerProps) {
               <CardTitle>单项结果</CardTitle>
               <CardDescription>
                 {result?.persisted
-                  ? "每一行都已经落库，可以直接跳转到运行详情页。"
-                  : "即使没有数据库，也会先显示结果；配置 DATABASE_URL 后可获得可持久化的详情链接。"}
+                  ? result.storage.target === "database"
+                    ? "每一行都已经落库，可以直接跳转到运行详情页。"
+                    : `每一行都已经保存到${result.storage.label}，可以直接跳转到运行详情页。`
+                  : "即使没有数据库，也会先显示结果；系统会优先回退到文件存储，若仍失败则无法生成详情链接。"}
               </CardDescription>
             </CardHeader>
             <CardContent className="overflow-x-auto">
@@ -805,6 +860,86 @@ function buildSummaryStats(result: BenchmarkRunResponse | null) {
             draftRates.reduce((sum, value) => sum + value, 0) / draftRates.length,
           ),
   };
+}
+
+function buildHeadToHeadSummary(result: BenchmarkRunResponse | null) {
+  if (!result) {
+    return null;
+  }
+
+  const baseline = result.aggregates.find(
+    (aggregate) => aggregate.mode === "baseline",
+  );
+  const draftVerifier = result.aggregates.find(
+    (aggregate) => aggregate.mode === "draft_verifier",
+  );
+
+  if (!baseline || !draftVerifier) {
+    return null;
+  }
+
+  const latencyDelta = relativeDelta(
+    baseline.averageLatencyMs,
+    draftVerifier.averageLatencyMs,
+  );
+  const costDelta = relativeDelta(
+    baseline.averageEstimatedCostUsd,
+    draftVerifier.averageEstimatedCostUsd,
+  );
+  const successDelta = relativeGain(
+    baseline.averageTaskSuccessScore,
+    draftVerifier.averageTaskSuccessScore,
+  );
+
+  const latencyLine =
+    latencyDelta === null
+      ? "当前样本里还没有足够的时延数据。"
+      : latencyDelta > 0.03
+        ? `当前样本中，草稿 + 校验平均比单代理快 ${formatSignedDelta(latencyDelta, false)}。`
+        : latencyDelta < -0.03
+          ? `当前样本中尚未观察到加速，单代理平均快 ${formatSignedDelta(latencyDelta, true)}。`
+          : "当前样本中，两种模式的平均时延接近。";
+
+  const costLine =
+    costDelta === null
+      ? "成本差异暂时不可用。"
+      : costDelta > 0.03
+        ? `成本上，草稿 + 校验平均低 ${formatSignedDelta(costDelta, false)}。`
+        : costDelta < -0.03
+          ? `成本上，草稿 + 校验平均高 ${formatSignedDelta(costDelta, true)}。`
+          : "成本上，两种模式接近。";
+
+  const qualityLine =
+    successDelta === null
+      ? "质量差异暂时不可用。"
+      : successDelta > 0.03
+        ? `质量上，草稿 + 校验平均高 ${formatSignedDelta(successDelta, false)}。`
+        : successDelta < -0.03
+          ? `质量上，草稿 + 校验平均低 ${formatSignedDelta(successDelta, true)}，需要结合速度一起看。`
+          : "质量上，两种模式接近。";
+
+  return `${latencyLine} ${costLine} ${qualityLine}`;
+}
+
+function relativeDelta(baseline: number, candidate: number) {
+  if (!Number.isFinite(baseline) || baseline <= 0 || !Number.isFinite(candidate)) {
+    return null;
+  }
+
+  return (baseline - candidate) / baseline;
+}
+
+function relativeGain(baseline: number, candidate: number) {
+  if (!Number.isFinite(baseline) || baseline <= 0 || !Number.isFinite(candidate)) {
+    return null;
+  }
+
+  return (candidate - baseline) / baseline;
+}
+
+function formatSignedDelta(value: number, invert = false) {
+  const normalized = invert ? Math.abs(value) : value;
+  return `${Math.round(Math.abs(normalized) * 100)}%`;
 }
 
 function formatCategory(category: string) {

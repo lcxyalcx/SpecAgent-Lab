@@ -13,10 +13,12 @@ import {
   Lightbulb,
   MessageSquare,
   Timer,
+  TriangleAlert,
   Wrench,
 } from "lucide-react";
 
 import { PageHeader } from "@/components/app/page-header";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -27,8 +29,14 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
-import { DatabaseNotConfiguredError, getPrisma } from "@/lib/db";
+import {
+  formatDatabaseError,
+  getPrisma,
+  withDatabaseTimeout,
+} from "@/lib/db";
 import { isDatabaseConfigured } from "@/lib/env";
+import { getFileRunById, toRunDetailRow } from "@/lib/persistence/file-store";
+import { buildStorageInfo } from "@/lib/persistence/state";
 import {
   buildRunDetailViewModel,
   buildTimelineSteps,
@@ -83,20 +91,32 @@ export async function generateMetadata({ params }: RunDetailPageProps): Promise<
   }
 
   if (!isDatabaseConfigured()) {
+    const fileRun = await getFileRunById(displayId);
+    if (fileRun) {
+      return { title: `${fileRun.name} · SpecAgent Lab` };
+    }
+
     return { title: "运行详情 · SpecAgent Lab" };
   }
 
   try {
-    const run = await getPrisma().run.findUnique({
-      where: { id: displayId },
-      select: { name: true },
-    });
+    const run = await withDatabaseTimeout(
+      getPrisma().run.findUnique({
+        where: { id: displayId },
+        select: { name: true },
+      }),
+    );
 
     if (run) {
       return { title: `${run.name} · SpecAgent Lab` };
     }
   } catch {
     /* ignore */
+  }
+
+  const fileRun = await getFileRunById(displayId);
+  if (fileRun) {
+    return { title: `${fileRun.name} · SpecAgent Lab` };
   }
 
   return { title: `运行 ${displayId.slice(0, 8)}… · SpecAgent Lab` };
@@ -110,20 +130,56 @@ export default async function RunDetailPage({ params }: RunDetailPageProps) {
     return <DemoRunFallback displayId={displayId} />;
   }
 
-  if (!isDatabaseConfigured()) {
+  let run = null;
+  let loadError: string | null = null;
+  let runSource: "database" | "file" | null = null;
+  const databaseConfigured = isDatabaseConfigured();
+
+  if (databaseConfigured) {
+    try {
+      run = await withDatabaseTimeout(
+        getPrisma().run.findUnique({
+          where: { id: displayId },
+          include: {
+            agentConfig: true,
+            benchmarkTask: true,
+            toolCalls: { orderBy: { sequence: "asc" } },
+          },
+        }),
+      );
+
+      if (run) {
+        runSource = "database";
+      }
+    } catch (error) {
+      loadError = formatDatabaseError(error);
+    }
+  }
+
+  if (!run) {
+    const fileRun = await getFileRunById(displayId);
+    if (fileRun) {
+      run = toRunDetailRow(fileRun);
+      runSource = "file";
+    }
+  }
+
+  if (!run && !databaseConfigured) {
     return (
       <div className="flex flex-col gap-6">
         <PageHeader
           eyebrow="运行详情"
           title="暂时还没有可查看的运行详情"
-          description="当前环境还没有配置数据库，所以系统无法保存和读取真实运行记录。你仍然可以先使用示例数据熟悉界面。"
+          description="当前环境还没有配置数据库，也还没有命中可用的本地文件记录。你仍然可以先跑一次任务，系统会自动回退到文件存储。"
         />
         <Card>
           <CardContent className="grid gap-3 pt-6 text-sm leading-6 text-muted-foreground">
             <p>
-              请在环境变量中设置 <span className="font-mono">DATABASE_URL</span>（如 Vercel Postgres、Neon），并执行{" "}
-              <span className="font-mono">pnpm run db:push</span> 与{" "}
-              <span className="font-mono">pnpm run db:seed</span>（可选），再运行一次批量测试生成可查看的历史记录。
+              现在即使没有 <span className="font-mono">DATABASE_URL</span>，运行结果也会先保存到本地文件。完成一次试运行或批量测试后，可以直接回到这里查看真实记录。
+            </p>
+            <p>
+              如果你希望这些记录在多实例和长期运行中都稳定保留，仍然建议配置 PostgreSQL，并执行{" "}
+              <span className="font-mono">pnpm run db:push</span>。
             </p>
             <p className="text-xs">
               请求 ID：<span className="font-mono">{displayId}</span>
@@ -134,7 +190,7 @@ export default async function RunDetailPage({ params }: RunDetailPageProps) {
           <Button asChild variant="outline">
             <Link href="/dashboard">
               <ArrowLeft className="size-4" aria-hidden="true" />
-              查看结果总览（示例数据）
+              查看结果总览
             </Link>
           </Button>
           <Button asChild variant="outline">
@@ -145,34 +201,13 @@ export default async function RunDetailPage({ params }: RunDetailPageProps) {
     );
   }
 
-  let loadError: string | null = null;
-  let run = null;
-
-  try {
-    run = await getPrisma().run.findUnique({
-      where: { id: displayId },
-      include: {
-        agentConfig: true,
-        benchmarkTask: true,
-        toolCalls: { orderBy: { sequence: "asc" } },
-      },
-    });
-  } catch (error) {
-    if (error instanceof DatabaseNotConfiguredError) {
-      loadError = error.message;
-    } else {
-      loadError =
-        error instanceof Error ? error.message : "暂时无法从数据库加载这次运行。";
-    }
-  }
-
-  if (loadError) {
+  if (loadError && !run) {
     return (
       <div className="flex flex-col gap-6">
         <PageHeader
           eyebrow="运行详情"
           title="数据库不可用"
-          description="请配置 DATABASE_URL 后重试；批量测试结果会写入历史记录。"
+          description="已检测到 DATABASE_URL，但当前无法读取这次运行记录，也没有找到对应的文件回退记录。请先恢复数据库连接，再重试。"
         />
         <Card>
           <CardContent className="pt-6 text-sm text-muted-foreground">{loadError}</CardContent>
@@ -227,6 +262,23 @@ export default async function RunDetailPage({ params }: RunDetailPageProps) {
           </div>
         }
       />
+
+      {runSource === "file" ? (
+        <Alert>
+          <TriangleAlert className="size-4" aria-hidden="true" />
+          <AlertTitle>
+            {loadError ? "数据库不可用，当前展示文件回退记录" : "当前展示文件回退记录"}
+          </AlertTitle>
+          <AlertDescription>
+            {buildStorageInfo(
+              "file",
+              loadError
+                ? `${buildStorageInfo("file").message} 当前数据库状态：${loadError}`
+                : buildStorageInfo("file").message,
+            ).message}
+          </AlertDescription>
+        </Alert>
+      ) : null}
 
       <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <MetricTile

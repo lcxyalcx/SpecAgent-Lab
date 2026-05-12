@@ -21,9 +21,11 @@ import {
   Gauge,
   Lightbulb,
   Timer,
+  TriangleAlert,
   Wrench,
 } from "lucide-react";
 
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { PageHeader } from "@/components/app/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -79,9 +81,15 @@ export function AnalyticsDashboard({ payload }: AnalyticsDashboardProps) {
             >
               {source === "database"
                 ? "实时数据"
+                : source === "file"
+                  ? payload.storage.ephemeral
+                    ? "临时文件数据"
+                    : "本地文件数据"
                 : source === "demo"
                   ? "示例数据（未配置数据库）"
-                  : "示例数据（数据库为空）"}
+                  : source === "unavailable"
+                    ? "示例数据（数据库不可用）"
+                    : "示例数据（数据库为空）"}
             </Badge>
             <Button asChild variant="outline" size="sm">
               <Link href="/benchmark">
@@ -92,6 +100,30 @@ export function AnalyticsDashboard({ payload }: AnalyticsDashboardProps) {
           </div>
         }
       />
+
+      {source === "file" ? (
+        <Alert>
+          <TriangleAlert className="size-4" aria-hidden="true" />
+          <AlertTitle>
+            {payload.databaseMessage ? "数据库不可用，当前展示文件回退数据" : "当前展示文件回退数据"}
+          </AlertTitle>
+          <AlertDescription>
+            {payload.storage.message ??
+              "当前结果总览来自文件回退记录，因此不依赖 PostgreSQL 也能继续查看。"}
+          </AlertDescription>
+        </Alert>
+      ) : null}
+
+      {source === "unavailable" ? (
+        <Alert>
+          <TriangleAlert className="size-4" aria-hidden="true" />
+          <AlertTitle>数据库当前不可用，以下图表已回退为示例数据</AlertTitle>
+          <AlertDescription>
+            {payload.databaseMessage ??
+              "已检测到 DATABASE_URL，但当前无法连接数据库。请确认数据库服务可达后再查看实时结果。"}
+          </AlertDescription>
+        </Alert>
+      ) : null}
 
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         <StatCard

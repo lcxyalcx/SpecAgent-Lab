@@ -5,7 +5,9 @@ import { apiProviderConfigSchema } from "@/lib/ai/config";
 import { getAiProvider, hasAiProviderCredentials } from "@/lib/ai/provider";
 import { runBenchmark } from "@/lib/benchmark/runner";
 import { benchmarkTaskLibrary } from "@/lib/benchmark/tasks";
-import { isDatabaseConfigured } from "@/lib/env";
+import { getDatabaseState } from "@/lib/db";
+import { buildDatabaseState } from "@/lib/database-state";
+import { buildStorageInfo } from "@/lib/persistence/state";
 
 const benchmarkRunRequestSchema = z.object({
   taskIds: z
@@ -78,15 +80,35 @@ export async function POST(request: Request) {
   }
 
   try {
+    let databaseState = await getDatabaseState();
     const result = await runBenchmark({
       taskIds,
       modes,
       useLlmJudge,
       providerConfig,
-      persistRuns: isDatabaseConfigured(),
+      persistRuns: databaseState.available,
     });
+    let storage = result.storage;
 
-    return NextResponse.json(result);
+    if (result.persistenceIssue) {
+      databaseState = buildDatabaseState("unavailable", result.persistenceIssue);
+    }
+
+    if (
+      (storage.target === "file" || storage.target === "mixed") &&
+      databaseState.message
+    ) {
+      storage = buildStorageInfo(
+        storage.target,
+        `${buildStorageInfo(storage.target).message} 当前数据库状态：${databaseState.message}`,
+      );
+    }
+
+    return NextResponse.json({
+      ...result,
+      storage,
+      persistence: databaseState,
+    });
   } catch (error) {
     console.error("Benchmark run route failed", {
       error: error instanceof Error ? error.message : "Unknown error",

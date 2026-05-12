@@ -28,13 +28,13 @@ export const DEFAULT_MODELS = {
   openai: {
     baseline: "gpt-5.4",
     draft: "gpt-5.4-mini",
-    verifier: "gpt-5.4",
+    verifier: "gpt-5.4-mini",
     judge: "gpt-4o-mini",
   },
   siliconflow: {
     baseline: "deepseek-ai/DeepSeek-V3",
-    draft: "deepseek-ai/DeepSeek-V3",
-    verifier: "deepseek-ai/DeepSeek-V3",
+    draft: "Qwen/Qwen2.5-7B-Instruct",
+    verifier: "Qwen/Qwen2.5-7B-Instruct",
     judge: "deepseek-ai/DeepSeek-V3",
   },
 } as const satisfies Record<

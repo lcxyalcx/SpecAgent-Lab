@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useMemo, useState } from "react";
 import {
   Activity,
@@ -42,6 +43,7 @@ import {
   isKnownModelCompatibleWithProvider,
   type AiProvider,
 } from "@/lib/ai/catalog";
+import type { StorageInfo } from "@/lib/persistence/state";
 import { cn } from "@/lib/utils";
 
 const toolOptions = [
@@ -86,6 +88,13 @@ type EnabledTool = (typeof toolOptions)[number]["id"];
 type PlaygroundRunResponse = {
   runId: string;
   persisted: boolean;
+  persistence: {
+    status: "ready" | "not_configured" | "unavailable";
+    configured: boolean;
+    available: boolean;
+    message: string | null;
+  };
+  storage: StorageInfo;
   mode: Mode;
   status: "succeeded" | "failed";
   output: string;
@@ -580,12 +589,35 @@ export function AgentPlayground({ defaultProvider }: AgentPlaygroundProps) {
             </Alert>
           ) : null}
 
+          {runResult && runResult.persisted ? (
+            <Alert>
+              <Sparkles className="size-4" aria-hidden="true" />
+              <AlertTitle>
+                {runResult.storage.target === "file"
+                  ? `已保存到${runResult.storage.label}`
+                  : "本次运行已保存"}
+              </AlertTitle>
+              <AlertDescription className="flex flex-wrap items-center gap-3">
+                <span>{runResult.storage.message}</span>
+                <Button asChild size="sm" variant="outline">
+                  <Link href={`/runs/${encodeURIComponent(runResult.runId)}`}>
+                    打开运行详情
+                  </Link>
+                </Button>
+              </AlertDescription>
+            </Alert>
+          ) : null}
+
           {runResult && !runResult.persisted ? (
             <Alert>
               <TriangleAlert className="size-4" aria-hidden="true" />
               <AlertTitle>未持久化运行</AlertTitle>
               <AlertDescription>
-                当前数据库尚未配置，这次试运行结果会先显示在当前页面，不会保存到 <span className="font-mono">/runs/[id]</span>。
+                {runResult.storage.message ??
+                  (runResult.persistence.status === "not_configured"
+                    ? "当前尚未配置 DATABASE_URL，这次试运行结果会先显示在当前页面，不会保存到 /runs/[id]。"
+                    : runResult.persistence.message ??
+                      "已检测到 DATABASE_URL，但当前无法连接数据库。这次试运行结果会先显示在当前页面，不会保存到 /runs/[id]。")}
               </AlertDescription>
             </Alert>
           ) : null}

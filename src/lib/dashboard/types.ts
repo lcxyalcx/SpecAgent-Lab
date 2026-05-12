@@ -1,3 +1,5 @@
+import type { StorageInfo } from "@/lib/persistence/state";
+
 export type BenchmarkWorkflowMode = "baseline" | "draft_verifier";
 
 export type NormalizedRun = {
@@ -33,8 +35,10 @@ export type DashboardOverview = {
 };
 
 export type DashboardPayload = {
-  /** database = real Postgres rows; mock = DB OK but no compatible runs; demo = DATABASE_URL unset */
-  source: "database" | "mock" | "demo";
+  /** database = real Postgres rows; file = local fallback rows; mock = DB OK but no compatible runs; demo = DATABASE_URL unset and no local rows; unavailable = DB configured but unreachable and no local rows */
+  source: "database" | "file" | "mock" | "demo" | "unavailable";
+  databaseMessage: string | null;
+  storage: StorageInfo;
   overview: DashboardOverview;
   comparison: {
     baseline: ModeComparisonRow;

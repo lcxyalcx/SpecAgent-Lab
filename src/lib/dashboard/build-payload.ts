@@ -12,6 +12,7 @@ import {
   buildEvaluationSnapshot,
   DEFAULT_LAB_CONFIG,
 } from "@/lib/mock-evaluation";
+import { buildStorageInfo } from "@/lib/persistence/state";
 
 const HARD_DIFFICULTY = 4;
 
@@ -211,6 +212,8 @@ export function buildDashboardPayload(
 
   return {
     source,
+    databaseMessage: null,
+    storage: buildStorageInfo(source === "database" ? "database" : "file"),
     overview,
     comparison: {
       baseline: comparison.baseline,
@@ -371,6 +374,10 @@ function buildProductInsight(
           baseline.avgTaskSuccessScore) *
         100
       : 0;
+  const costDeltaPct =
+    baseline.avgCostUsd > 0.000001
+      ? ((baseline.avgCostUsd - draft.avgCostUsd) / baseline.avgCostUsd) * 100
+      : 0;
 
   let latencyPhrase: string;
   if (latDeltaPct > 3) {
@@ -390,6 +397,15 @@ function buildProductInsight(
     successPhrase = "两种模式的整体任务成功分接近。";
   }
 
+  let costPhrase: string;
+  if (costDeltaPct > 3) {
+    costPhrase = `从成本看，草稿加校验每次运行大约便宜 ${Math.round(costDeltaPct)}%。`;
+  } else if (costDeltaPct < -3) {
+    costPhrase = `从成本看，草稿加校验每次运行大约贵 ${Math.round(-costDeltaPct)}%。`;
+  } else {
+    costPhrase = "两种模式的平均成本接近。";
+  }
+
   let hardPhrase = "";
   if (hard.baseline.count && hard.draftVerifier.count) {
     const h =
@@ -404,7 +420,7 @@ function buildProductInsight(
     }
   }
 
-  return `${latencyPhrase}${successPhrase}${hardPhrase}`;
+  return `${latencyPhrase}${costPhrase}${successPhrase}${hardPhrase}`;
 }
 
 export function buildMockDashboardPayload(): DashboardPayload {
@@ -455,5 +471,8 @@ export function buildMockDashboardPayload(): DashboardPayload {
     }
   }
 
-  return buildDashboardPayload(normalized, "mock");
+  return {
+    ...buildDashboardPayload(normalized, "mock"),
+    storage: buildStorageInfo("none"),
+  };
 }

@@ -23,7 +23,16 @@ import {
 import { sanitizeApiProviderConfig } from "@/lib/ai/config";
 import type { ApiProviderConfigInput } from "@/lib/ai/config";
 import { getDefaultAgentModels } from "@/lib/ai/provider";
-import { getPrisma } from "@/lib/db";
+import {
+  formatDatabaseError,
+  getPrisma,
+  withDatabaseTimeout,
+} from "@/lib/db";
+import { persistRunRecordToFile } from "@/lib/persistence/file-store";
+import {
+  buildStorageInfo,
+  type StorageInfo,
+} from "@/lib/persistence/state";
 
 export type BenchmarkMode = "baseline" | "draft_verifier";
 
@@ -85,6 +94,14 @@ export type BenchmarkAggregateRow = {
 export type BenchmarkRunnerResult = {
   benchmarkId: string;
   persisted: boolean;
+  persistenceIssue: string | null;
+  storage: StorageInfo;
+  modelProfile: {
+    baseline: string;
+    draft: string;
+    verifier: string;
+    judge: string;
+  };
   results: BenchmarkRunRow[];
   aggregates: BenchmarkAggregateRow[];
 };
@@ -96,6 +113,8 @@ export async function runBenchmark(
   const defaultModels = getDefaultAgentModels(input.providerConfig);
   const benchmarkId = `bench_${Date.now()}`;
   const tasks = benchmarkTaskLibrary.filter((task) => input.taskIds.includes(task.id));
+  let persistenceIssue: string | null = null;
+  const storageTargets = new Set<"database" | "file">();
   let persistenceContext: {
     prisma: ReturnType<typeof getPrisma>;
     modeConfigs: Map<BenchmarkMode, AgentConfig>;
@@ -104,13 +123,16 @@ export async function runBenchmark(
   if (input.persistRuns === true) {
     try {
       const prisma = getPrisma();
-      const modeConfigs = await createModeConfigs(
-        prisma,
-        input.modes,
-        input.providerConfig,
+      const modeConfigs = await withDatabaseTimeout(
+        createModeConfigs(
+          prisma,
+          input.modes,
+          input.providerConfig,
+        ),
       );
       persistenceContext = { prisma, modeConfigs };
     } catch (error) {
+      persistenceIssue = formatDatabaseError(error);
       console.error("Benchmark persistence unavailable", {
         error: error instanceof Error ? error.message : "Unknown error",
       });
@@ -124,11 +146,14 @@ export async function runBenchmark(
 
     if (persistenceContext) {
       try {
-        persistedTask = await ensureBenchmarkTaskRecord(
-          persistenceContext.prisma,
-          task,
+        persistedTask = await withDatabaseTimeout(
+          ensureBenchmarkTaskRecord(
+            persistenceContext.prisma,
+            task,
+          ),
         );
       } catch (error) {
+        persistenceIssue = formatDatabaseError(error);
         console.error("Benchmark task persistence failed", {
           taskId: task.id,
           error: error instanceof Error ? error.message : "Unknown error",
@@ -165,81 +190,92 @@ export async function runBenchmark(
         useLlmJudge,
         input.providerConfig,
       );
+      const runName = `${benchmarkId} · ${getModeLabel(mode)} · ${getTaskDisplayTitle(task.id, task.title)}`;
+      const serializedInput = {
+        benchmarkId,
+        mode,
+        taskId: task.id,
+        taskTitle: task.title,
+        category: task.category,
+        difficulty: task.difficulty,
+        systemPrompt: buildBenchmarkSystemPrompt(task, mode),
+        userPrompt: buildBenchmarkUserPrompt(task),
+        enabledTools: defaultEnabledToolsForTask(task),
+        useLlmJudge,
+        providerConfig: sanitizeApiProviderConfig(input.providerConfig),
+      };
+      const serializedOutput = buildRunOutput(runResult);
+      const serializedSummary = {
+        benchmarkId,
+        mode,
+        taskSuccessScore: metrics.taskSuccessScore,
+        evaluationMethod: metrics.evaluationMethod,
+        evaluationExplanation: metrics.evaluationExplanation,
+        reasoningQualityScore: metrics.reasoningQualityScore,
+        constraintSatisfactionScore: metrics.constraintSatisfactionScore,
+        toolUseScore: metrics.toolUseScore,
+        verifierReason:
+          isDraftVerifierRunResult(runResult) ? runResult.verifier.reason : null,
+        draftAccepted:
+          isDraftVerifierRunResult(runResult) ? runResult.metrics.draftAccepted : null,
+      };
+      const serializedMetrics = {
+        ...metrics,
+        toolCallCount: runResult.metrics.toolCallCount,
+        toolErrorCount: runResult.metrics.toolErrorCount,
+        totalTokens: runResult.metrics.totalTokens,
+      };
       let runId = createTransientBenchmarkRunId(benchmarkId, mode, task.id);
       let persisted = false;
 
       if (persistenceContext && persistedTask) {
         try {
-          const persistedRun = await persistenceContext.prisma.run.create({
-            data: {
-              name: `${benchmarkId} · ${getModeLabel(mode)} · ${getTaskDisplayTitle(task.id, task.title)}`,
-              agentConfigId: persistenceContext.modeConfigs.get(mode)!.id,
-              benchmarkTaskId: persistedTask.id,
-              status:
-                runResult.status === "succeeded"
-                  ? RunStatus.SUCCEEDED
-                  : RunStatus.FAILED,
-              input: toJsonValue({
-                benchmarkId,
-                mode,
-                taskId: task.id,
-                taskTitle: task.title,
-                category: task.category,
-                difficulty: task.difficulty,
-                systemPrompt: buildBenchmarkSystemPrompt(task, mode),
-                userPrompt: buildBenchmarkUserPrompt(task),
-                enabledTools: defaultEnabledToolsForTask(task),
-                useLlmJudge,
-                providerConfig: sanitizeApiProviderConfig(input.providerConfig),
-              }),
-              output: toJsonValue(buildRunOutput(runResult)),
-              summary: toJsonValue({
-                benchmarkId,
-                mode,
-                taskSuccessScore: metrics.taskSuccessScore,
-                evaluationMethod: metrics.evaluationMethod,
-                evaluationExplanation: metrics.evaluationExplanation,
-                reasoningQualityScore: metrics.reasoningQualityScore,
-                constraintSatisfactionScore: metrics.constraintSatisfactionScore,
-                toolUseScore: metrics.toolUseScore,
-                verifierReason:
-                  isDraftVerifierRunResult(runResult) ? runResult.verifier.reason : null,
-                draftAccepted:
-                  isDraftVerifierRunResult(runResult) ? runResult.metrics.draftAccepted : null,
-              }),
-              metrics: toJsonValue({
-                ...metrics,
-                toolCallCount: runResult.metrics.toolCallCount,
-                toolErrorCount: runResult.metrics.toolErrorCount,
-                totalTokens: runResult.metrics.totalTokens,
-              }),
-              startedAt: new Date(runResult.startedAt),
-              finishedAt: new Date(runResult.finishedAt),
-            },
-          });
+          const persistedRun = await withDatabaseTimeout(
+            persistenceContext.prisma.run.create({
+              data: {
+                name: runName,
+                agentConfigId: persistenceContext.modeConfigs.get(mode)!.id,
+                benchmarkTaskId: persistedTask.id,
+                status:
+                  runResult.status === "succeeded"
+                    ? RunStatus.SUCCEEDED
+                    : RunStatus.FAILED,
+                input: toJsonValue(serializedInput),
+                output: toJsonValue(serializedOutput),
+                summary: toJsonValue(serializedSummary),
+                metrics: toJsonValue(serializedMetrics),
+                startedAt: new Date(runResult.startedAt),
+                finishedAt: new Date(runResult.finishedAt),
+              },
+            }),
+          );
 
           if (runResult.toolCalls.length > 0) {
-            await persistenceContext.prisma.toolCall.createMany({
-              data: runResult.toolCalls.map((toolCall, index) => ({
-                runId: persistedRun.id,
-                toolName: toolCall.toolName,
-                sequence: index + 1,
-                status: toolCall.success
-                  ? ToolCallStatus.SUCCEEDED
-                  : ToolCallStatus.FAILED,
-                input: toJsonValue(toolCall.input),
-                output: toJsonValue(toolCall.output),
-                error: toJsonValue(
-                  toolCall.error ? { message: toolCall.error } : null,
-                ),
-                latencyMs: toolCall.latencyMs,
-              })),
-            });
+            await withDatabaseTimeout(
+              persistenceContext.prisma.toolCall.createMany({
+                data: runResult.toolCalls.map((toolCall, index) => ({
+                  runId: persistedRun.id,
+                  toolName: toolCall.toolName,
+                  sequence: index + 1,
+                  status: toolCall.success
+                    ? ToolCallStatus.SUCCEEDED
+                    : ToolCallStatus.FAILED,
+                  input: toJsonValue(toolCall.input),
+                  output: toJsonValue(toolCall.output),
+                  error: toJsonValue(
+                    toolCall.error ? { message: toolCall.error } : null,
+                  ),
+                  latencyMs: toolCall.latencyMs,
+                })),
+              }),
+            );
           }
 
           runId = persistedRun.id;
           persisted = true;
+          storageTargets.add("database");
         } catch (error) {
+          persistenceIssue = formatDatabaseError(error);
           console.error("Benchmark run persistence failed", {
             benchmarkId,
             mode,
@@ -247,6 +283,88 @@ export async function runBenchmark(
             error: error instanceof Error ? error.message : "Unknown error",
           });
           persistenceContext = null;
+        }
+      }
+
+      if (!persisted) {
+        try {
+          const filePersistence = await persistRunRecordToFile({
+            id: runId,
+            name: runName,
+            status:
+              runResult.status === "succeeded"
+                ? RunStatus.SUCCEEDED
+                : RunStatus.FAILED,
+            input: serializedInput,
+            output: serializedOutput,
+            summary: serializedSummary,
+            metrics: serializedMetrics,
+            startedAt: new Date(runResult.startedAt),
+            finishedAt: new Date(runResult.finishedAt),
+            agentConfig: {
+              name:
+                mode === "baseline"
+                  ? "批量测试单代理"
+                  : "批量测试草稿校验",
+              mode:
+                mode === "baseline"
+                  ? AgentMode.BASELINE
+                  : AgentMode.DRAFT_VERIFIER,
+              model:
+                mode === "baseline"
+                  ? defaultModels.baseline
+                  : `${defaultModels.draft} -> ${defaultModels.verifier}`,
+              systemPrompt:
+                mode === "baseline"
+                  ? "用于批量测试的单代理默认配置。"
+                  : "用于批量测试的草稿加校验默认配置。",
+              enabledTools: ["calculator", "mockSearch", "productDb", "calendar"],
+              toolConfig: {
+                source: "benchmark-runner",
+                mode,
+                providerConfig: sanitizeApiProviderConfig(input.providerConfig),
+              },
+            },
+            benchmarkTask: {
+              slug: task.id,
+              title: getTaskDisplayTitle(task.id, task.title),
+              description: task.expectedOutcome,
+              category: task.category,
+              difficulty: difficultyWeight(task.difficulty),
+              conversation: [
+                task.initialPrompt,
+                task.userGoal,
+                task.expectedOutcome,
+              ],
+              evaluationRubric: task.evaluationRubric,
+              expectedTools: defaultEnabledToolsForTask(task),
+              toolConfig: {
+                source: "benchmark-library",
+                deterministic: true,
+              },
+            },
+            toolCalls: runResult.toolCalls.map((toolCall, index) => ({
+              sequence: index + 1,
+              toolName: toolCall.toolName,
+              status: toolCall.success
+                ? ToolCallStatus.SUCCEEDED
+                : ToolCallStatus.FAILED,
+              input: toolCall.input,
+              output: toolCall.output,
+              error: toolCall.error ? { message: toolCall.error } : null,
+              latencyMs: toolCall.latencyMs,
+            })),
+          });
+          runId = filePersistence.runId;
+          persisted = true;
+          storageTargets.add("file");
+        } catch (error) {
+          console.error("Benchmark file persistence failed", {
+            benchmarkId,
+            mode,
+            taskId: task.id,
+            error: error instanceof Error ? error.message : "Unknown error",
+          });
         }
       }
 
@@ -276,6 +394,9 @@ export async function runBenchmark(
   return {
     benchmarkId,
     persisted: results.length > 0 && results.every((result) => result.persisted),
+    persistenceIssue,
+    storage: buildResultStorageInfo(storageTargets, results),
+    modelProfile: defaultModels,
     results,
     aggregates: buildAggregates(results),
   };
@@ -540,6 +661,48 @@ function buildAggregates(results: BenchmarkRunRow[]) {
           : roundMetric(average(confidenceScores)),
     };
   });
+}
+
+function buildResultStorageInfo(
+  storageTargets: Set<"database" | "file">,
+  results: BenchmarkRunRow[],
+) {
+  if (results.length === 0 || results.every((result) => !result.persisted)) {
+    return buildStorageInfo("none");
+  }
+
+  const fullyPersisted = results.every((result) => result.persisted);
+
+  if (!fullyPersisted) {
+    if (storageTargets.has("database") && storageTargets.has("file")) {
+      return buildStorageInfo(
+        "mixed",
+        "本次只有部分结果完成持久化；已保存的行可以打开详情，未保存的行不会生成可用链接。",
+      );
+    }
+
+    if (storageTargets.has("database")) {
+      return buildStorageInfo(
+        "database",
+        "本次只有部分结果成功写入数据库；未保存的行不会生成可用的详情链接。",
+      );
+    }
+
+    return buildStorageInfo(
+      "file",
+      "本次只有部分结果成功写入文件回退存储；未保存的行不会生成可用的详情链接。",
+    );
+  }
+
+  if (storageTargets.has("database") && storageTargets.has("file")) {
+    return buildStorageInfo("mixed");
+  }
+
+  if (storageTargets.has("database")) {
+    return buildStorageInfo("database");
+  }
+
+  return buildStorageInfo("file");
 }
 
 function buildRunOutput(runResult: RunResult | DraftVerifierRunResult) {

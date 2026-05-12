@@ -28,14 +28,15 @@ const MODEL_PRICING_USD_PER_1M_TOKENS: Record<
 
 const DEFAULT_MODEL_PRICING = { input: 1, output: 4 };
 const MAX_AGENT_STEPS = 6;
-const MAX_DRAFT_OUTPUT_TOKENS = 220;
-const MAX_VERIFIER_REVIEW_TOKENS = 120;
-const MAX_VERIFIER_OUTPUT_TOKENS = 320;
+const MAX_DRAFT_OUTPUT_TOKENS = 160;
+const MAX_VERIFIER_REVIEW_TOKENS = 64;
+const MAX_VERIFIER_OUTPUT_TOKENS = 260;
 
 const draftOutputSchema = z.object({
   draftAnswer: z.string().min(1),
-  draftPlan: z.array(z.string().min(1)).min(1).max(6),
-  expectedToolCalls: z.array(z.string().min(1)).max(6),
+  draftPlan: z.array(z.string().min(1)).min(1).max(4),
+  expectedToolCalls: z.array(z.string().min(1)).max(4),
+  confidenceScore: z.number().min(0).max(1),
 });
 
 const verifierReviewSchema = z.object({
@@ -44,7 +45,7 @@ const verifierReviewSchema = z.object({
   confidenceScore: z.number().min(0).max(1),
 });
 
-const draftSchemaHint = `{"draftAnswer":"string","draftPlan":["string"],"expectedToolCalls":["string"]}`;
+const draftSchemaHint = `{"draftAnswer":"string","draftPlan":["string"],"expectedToolCalls":["string"],"confidenceScore":0.0}`;
 const verifierSchemaHint = `{"decision":"accept|revise|reject","reason":"string","confidenceScore":0.0}`;
 
 export type DraftVerifierAgentInput = {
@@ -95,6 +96,7 @@ export async function runDraftVerifierAgent(
   let draftAnswer = "";
   let draftPlan: string[] = [];
   let expectedToolCalls: string[] = [];
+  let draftConfidenceScore = 0.5;
   let decision: "accept" | "revise" | "reject" = "reject";
   let reason = "Verifier did not complete.";
   let confidenceScore = 0;
@@ -105,68 +107,181 @@ export async function runDraftVerifierAgent(
 
   try {
     const draftStartedAt = Date.now();
-    const draftResult = await generateStructuredObject({
-      model: getLanguageModel(input.draftModel, input.providerConfig),
-      system: buildDraftSystemPrompt(input.systemPrompt),
-      prompt: buildDraftPrompt(input.userPrompt, activeTools),
-      maxOutputTokens: MAX_DRAFT_OUTPUT_TOKENS,
-      schema: draftOutputSchema,
-      schemaName: "draft_agent_result",
-      schemaDescription:
-        "Draft answer, short plan, and expected tool calls for a speculative-style draft-verifier workflow.",
-      jsonShapeHint: draftSchemaHint,
-    });
-    draftLatencyMs = Date.now() - draftStartedAt;
-    draftAnswer = draftResult.object.draftAnswer;
-    draftPlan = draftResult.object.draftPlan;
-    expectedToolCalls = draftResult.object.expectedToolCalls;
+    let normalizedDraftUsage = {
+      inputTokens: 0,
+      outputTokens: 0,
+    };
 
-    const normalizedDraftUsage = normalizeUsage({
-      inputTokens: draftResult.usage.inputTokens,
-      outputTokens: draftResult.usage.outputTokens,
-      fallbackInputText: `${input.systemPrompt}\n${input.userPrompt}`,
-      fallbackOutputText: JSON.stringify(draftResult.object),
-    });
+    try {
+      const draftResult = await generateStructuredObject({
+        model: getLanguageModel(input.draftModel, input.providerConfig),
+        system: buildDraftSystemPrompt(input.systemPrompt),
+        prompt: buildDraftPrompt(input.userPrompt, activeTools),
+        maxOutputTokens: MAX_DRAFT_OUTPUT_TOKENS,
+        schema: draftOutputSchema,
+        schemaName: "draft_agent_result",
+        schemaDescription:
+          "Draft answer, short plan, and expected tool calls for a speculative-style draft-verifier workflow.",
+        jsonShapeHint: draftSchemaHint,
+      });
+
+      draftAnswer = draftResult.object.draftAnswer;
+      draftPlan = draftResult.object.draftPlan;
+      expectedToolCalls = draftResult.object.expectedToolCalls;
+      draftConfidenceScore = draftResult.object.confidenceScore;
+      normalizedDraftUsage = normalizeUsage({
+        inputTokens: draftResult.usage.inputTokens,
+        outputTokens: draftResult.usage.outputTokens,
+        fallbackInputText: `${input.systemPrompt}\n${input.userPrompt}`,
+        fallbackOutputText: JSON.stringify(draftResult.object),
+      });
+    } catch {
+      const fallbackDraft = await generateText({
+        model: getLanguageModel(input.draftModel, input.providerConfig),
+        system: [
+          buildDraftSystemPrompt(input.systemPrompt),
+          "Return only the user-facing answer. Do not output JSON, markdown fences, or meta commentary.",
+        ].join("\n\n"),
+        prompt: buildDraftPrompt(input.userPrompt, activeTools),
+        maxOutputTokens: MAX_DRAFT_OUTPUT_TOKENS,
+      });
+
+      draftAnswer =
+        fallbackDraft.text.trim() ||
+        "I need to verify a few details before finalizing the answer.";
+      draftPlan = [
+        "Provide a concise user-ready draft, then let the verifier decide whether to ship or rewrite it.",
+      ];
+      expectedToolCalls = [];
+      draftConfidenceScore = 0.5;
+      normalizedDraftUsage = normalizeUsage({
+        inputTokens: fallbackDraft.totalUsage.inputTokens,
+        outputTokens: fallbackDraft.totalUsage.outputTokens,
+        fallbackInputText: `${input.systemPrompt}\n${input.userPrompt}`,
+        fallbackOutputText: fallbackDraft.text,
+      });
+    }
+
+    draftLatencyMs = Date.now() - draftStartedAt;
     totalInputTokens += normalizedDraftUsage.inputTokens;
     totalOutputTokens += normalizedDraftUsage.outputTokens;
     estimatedCostUsd += estimateCostUsd(input.draftModel, normalizedDraftUsage);
 
-    const verifierStartedAt = Date.now();
-    const verifierReview = await generateStructuredObject({
-      model: getLanguageModel(input.verifierModel, input.providerConfig),
-      system: buildVerifierSystemPrompt(input.systemPrompt),
-      prompt: buildVerifierReviewPrompt({
-        userPrompt: input.userPrompt,
+    if (
+      shouldSkipVerifier({
+        confidenceScore: draftConfidenceScore,
         draftAnswer,
-        draftPlan,
         expectedToolCalls,
-      }),
-      maxOutputTokens: MAX_VERIFIER_REVIEW_TOKENS,
-      schema: verifierReviewSchema,
-      schemaName: "verifier_review_result",
-      schemaDescription:
-        "Verifier decision for a speculative-style draft-verifier workflow. This is not token-level speculative decoding.",
-      jsonShapeHint: verifierSchemaHint,
-    });
+      })
+    ) {
+      decision = "accept";
+      reason =
+        "Draft stage high-confidence fast path accepted the answer without running the verifier.";
+      confidenceScore = draftConfidenceScore;
+      finalAnswer = draftAnswer;
 
-    decision = verifierReview.object.decision;
-    reason = verifierReview.object.reason;
-    confidenceScore = verifierReview.object.confidenceScore;
+      const finishedAt = new Date();
+      const totalLatencyMs = finishedAt.getTime() - startedAt.getTime();
 
-    const normalizedVerifierReviewUsage = normalizeUsage({
-      inputTokens: verifierReview.usage.inputTokens,
-      outputTokens: verifierReview.usage.outputTokens,
-      fallbackInputText: `${input.systemPrompt}\n${input.userPrompt}\n${draftAnswer}`,
-      fallbackOutputText: JSON.stringify(verifierReview.object),
-    });
-    totalInputTokens += normalizedVerifierReviewUsage.inputTokens;
-    totalOutputTokens += normalizedVerifierReviewUsage.outputTokens;
-    estimatedCostUsd += estimateCostUsd(
-      input.verifierModel,
-      normalizedVerifierReviewUsage,
-    );
+      return {
+        status: "succeeded",
+        workflow: "speculative-style draft-verifier",
+        benchmarkTaskId: input.benchmarkTaskId ?? null,
+        model: `${input.draftModel} -> ${input.verifierModel}`,
+        draftModel: input.draftModel,
+        verifierModel: input.verifierModel,
+        systemPrompt: input.systemPrompt,
+        userPrompt: input.userPrompt,
+        outputText: finalAnswer,
+        error: null,
+        startedAt: startedAt.toISOString(),
+        finishedAt: finishedAt.toISOString(),
+        latencyMs: totalLatencyMs,
+        toolCalls: [...toolCalls.values()],
+        draft: {
+          draftAnswer,
+          draftPlan,
+          expectedToolCalls,
+          latencyMs: draftLatencyMs,
+        },
+        verifier: {
+          decision,
+          reason,
+          confidenceScore,
+          latencyMs: 0,
+        },
+        metrics: {
+          toolCallCount: toolCalls.size,
+          toolErrorCount: [...toolCalls.values()].filter((call) => !call.success)
+            .length,
+          inputTokens: totalInputTokens,
+          outputTokens: totalOutputTokens,
+          totalTokens: totalInputTokens + totalOutputTokens,
+          estimatedCostUsd: roundCurrency(estimatedCostUsd),
+          draftLatencyMs,
+          verifierLatencyMs: 0,
+          totalLatencyMs,
+          draftAccepted: true,
+          draftAcceptanceRate: 1,
+          confidenceScore,
+        },
+      };
+    }
 
-    if (decision === "accept") {
+    const verifierStartedAt = Date.now();
+    try {
+      const verifierReview = await generateStructuredObject({
+        model: getLanguageModel(input.verifierModel, input.providerConfig),
+        system: buildVerifierSystemPrompt(input.systemPrompt),
+        prompt: buildVerifierReviewPrompt({
+          userPrompt: input.userPrompt,
+          draftAnswer,
+          draftPlan,
+          expectedToolCalls,
+        }),
+        maxOutputTokens: MAX_VERIFIER_REVIEW_TOKENS,
+        schema: verifierReviewSchema,
+        schemaName: "verifier_review_result",
+        schemaDescription:
+          "Verifier decision for a speculative-style draft-verifier workflow. This is not token-level speculative decoding.",
+        jsonShapeHint: verifierSchemaHint,
+      });
+
+      decision = verifierReview.object.decision;
+      reason = verifierReview.object.reason;
+      confidenceScore = verifierReview.object.confidenceScore;
+
+      const normalizedVerifierReviewUsage = normalizeUsage({
+        inputTokens: verifierReview.usage.inputTokens,
+        outputTokens: verifierReview.usage.outputTokens,
+        fallbackInputText: `${input.systemPrompt}\n${input.userPrompt}\n${draftAnswer}`,
+        fallbackOutputText: JSON.stringify(verifierReview.object),
+      });
+      totalInputTokens += normalizedVerifierReviewUsage.inputTokens;
+      totalOutputTokens += normalizedVerifierReviewUsage.outputTokens;
+      estimatedCostUsd += estimateCostUsd(
+        input.verifierModel,
+        normalizedVerifierReviewUsage,
+      );
+    } catch {
+      decision = "revise";
+      reason =
+        "Verifier could not return a structured review, so the workflow fell back to a full rewrite.";
+      confidenceScore = 0.25;
+    }
+
+    if (
+      shouldFastAcceptDraft({
+        decision,
+        confidenceScore,
+        draftAnswer,
+        expectedToolCalls,
+      })
+    ) {
+      if (decision !== "accept") {
+        reason = `${reason} Fast path accepted the draft because the verifier reported high confidence and no additional tool work was required.`;
+        decision = "accept";
+      }
       finalAnswer = draftAnswer;
       verifierLatencyMs = Date.now() - verifierStartedAt;
     } else {
@@ -402,7 +517,9 @@ function buildDraftPrompt(userPrompt: string, activeTools: EnabledToolName[]) {
   return [
     `User request: ${userPrompt}`,
     `Enabled tools: ${activeTools.length > 0 ? activeTools.join(", ") : "none"}`,
-    "Return a draft answer that is directionally useful, even if some details may need verifier revision.",
+    "Return a direct, user-ready draft answer. Keep the internal plan terse.",
+    "Prefer a strong answer that can be accepted as-is when the request is low risk and does not require tools.",
+    "Return confidenceScore from 0 to 1 for how safe it is to ship the draft without a second pass.",
   ].join("\n\n");
 }
 
@@ -427,9 +544,10 @@ function buildVerifierReviewPrompt(input: {
     `Draft plan: ${input.draftPlan.join(" | ")}`,
     `Expected tool calls: ${input.expectedToolCalls.join(", ") || "none"}`,
     "Decide whether to accept, revise, or reject the draft.",
-    "Accept if the draft is already strong enough to ship as the final answer.",
+    "Accept if the draft is already strong enough to ship as the final answer. Do not require perfection.",
     "Revise if the draft is useful but needs correction or tool-backed completion.",
     "Reject if the draft is materially flawed and should not shape the final answer.",
+    "Bias toward accept when the draft is correct, concrete, and the missing upside from further work is small.",
   ].join("\n\n");
 }
 
@@ -519,4 +637,37 @@ function formatUnknownError(error: unknown) {
   } catch {
     return "Unknown draft-verifier runtime error.";
   }
+}
+
+function shouldFastAcceptDraft(input: {
+  decision: "accept" | "revise" | "reject";
+  confidenceScore: number;
+  draftAnswer: string;
+  expectedToolCalls: string[];
+}) {
+  if (input.decision === "accept") {
+    return true;
+  }
+
+  if (input.decision !== "revise") {
+    return false;
+  }
+
+  return (
+    input.confidenceScore >= 0.85 &&
+    input.expectedToolCalls.length === 0 &&
+    input.draftAnswer.trim().length >= 120
+  );
+}
+
+function shouldSkipVerifier(input: {
+  confidenceScore: number;
+  draftAnswer: string;
+  expectedToolCalls: string[];
+}) {
+  return (
+    input.confidenceScore >= 0.9 &&
+    input.expectedToolCalls.length === 0 &&
+    input.draftAnswer.trim().length >= 140
+  );
 }
